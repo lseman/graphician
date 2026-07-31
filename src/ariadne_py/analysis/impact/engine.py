@@ -1,0 +1,176 @@
+"""Impact analysis engine: reverse graph walk and scoring."""
+
+from __future__ import annotations
+
+import heapq
+from collections import defaultdict
+from typing import Any
+
+from ...core.edge import Confidence, EdgeKind
+from ...core.graph import Graph
+from ...core.id import NodeId
+from ...core.node import Node, NodeKind
+from .types import ImpactHit, ImpactQuery
+
+
+def find_impact(graph: Graph, query: ImpactQuery) -> list[ImpactHit]:
+    """Walk the reverse graph from *query.seed_id* and rank nodes that
+    can reach it.
+
+    Returns hits sorted by score descending (highest impact first).
+    """
+    heap: list[tuple[float, int, int]] = [(0.0, 0, query.seed_id.value)]
+    best: dict[int, tuple[float, int, list[EdgeKind]]] = {}
+
+    while heap:
+        neg_cost, distance, nid_val = heapq.heappop(heap)
+        cost = -neg_cost
+
+        if distance > query.max_hops:
+            continue
+
+        seen = best.get(nid_val)
+        if seen and seen[0] <= cost:
+            continue
+        best[nid_val] = (cost, distance, seen[2] if seen else [])
+
+        if distance == query.max_hops:
+            continue
+
+        for prev, edge in graph.in_neighbors(NodeId(nid_val)):
+            pval = prev.value if isinstance(prev, NodeId) else prev
+            if pval in best and best[pval][0] <= cost + _impact_cost(edge):
+                continue
+            new_cost = cost + _impact_cost(edge)
+            via = (seen[2] if seen else []) + [edge.kind]
+            heapq.heappush(heap, (-new_cost, distance + 1, pval))
+
+    hits: list[ImpactHit] = []
+    for nid_val, (cost, distance, via) in best.items():
+        if nid_val == query.seed_id.value:
+            continue
+        node = graph.node(NodeId(nid_val))
+        if node is None:
+            continue
+        score = _compute_score(node, NodeId(nid_val), cost, distance)
+        hits.append(ImpactHit(
+            id=NodeId(nid_val),
+            score=score,
+            distance=distance,
+            via=via,
+            node=node,
+        ))
+
+    hits.sort(key=lambda h: h.score, reverse=True)
+    return hits[:query.limit]
+
+
+def _impact_cost(edge: Any) -> float:
+    """Cost to traverse an edge in reverse impact walk."""
+    base = {
+        EdgeKind.CALLS: 1.0,
+        EdgeKind.DEFINES: 1.25,
+        EdgeKind.IMPORTS: 1.6,
+        EdgeKind.DEPENDS_ON: 1.6,
+        EdgeKind.INHERITS: 0.75,
+        EdgeKind.IMPLEMENTS: 0.75,
+        EdgeKind.DATA_FLOW: 0.8,
+        EdgeKind.READS_WRITES: 0.9,
+        EdgeKind.TESTED_BY: 1.1,
+        EdgeKind.MEMBER_OF: 5.0,
+        EdgeKind.ENTRY_OF: 5.0,
+        EdgeKind.DESCRIBES: 1.2,
+        EdgeKind.DOCUMENTED_BY: 1.2,
+        EdgeKind.MENTIONS: 1.8,
+        EdgeKind.ILLUSTRATES: 1.8,
+        EdgeKind.SIMILAR_TO: 2.0,
+        EdgeKind.RATIONALE_FOR: 2.0,
+    }.get(edge.kind, 1.5)
+    return base / max(edge.confidence.score(), 0.05)
+
+
+def _node_kind_boost(kind: NodeKind) -> float:
+    """Impact ranking boost for node kinds."""
+    return {
+        NodeKind.FUNCTION: 1.3,
+        NodeKind.METHOD: 1.3,
+        NodeKind.CLASS: 1.3,
+        NodeKind.TYPE: 1.3,
+        NodeKind.TRAIT: 1.2,
+        NodeKind.IMPL: 1.2,
+        NodeKind.FILE: 0.95,
+        NodeKind.MODULE: 0.95,
+        NodeKind.DOCUMENT: 0.85,
+        NodeKind.SECTION: 0.85,
+        NodeKind.CONCEPT: 0.85,
+        NodeKind.DIAGRAM: 0.75,
+        NodeKind.IMAGE: 0.75,
+        NodeKind.VARIABLE: 0.7,
+        NodeKind.COMMIT: 0.7,
+        NodeKind.AUTHOR: 0.7,
+        NodeKind.HYPEREDGE: 0.7,
+        NodeKind.FLOW: 0.4,
+        NodeKind.PACKAGE: 0.95,
+    }.get(kind, 0.8)
+
+
+def _compute_score(node: Node, nid: NodeId, cost: float, distance: int) -> float:
+    """Compute impact score from cost, distance, and node kind."""
+    # Lower cost → higher score (inverse)
+    if cost == 0:
+        return 10.0
+    score = 1.0 / max(cost, 0.01)
+
+    # Node kind boost
+    score *= _node_kind_boost(node.kind)
+
+    # Distance decay
+    score *= 1.0 / (1.0 + distance * 0.5)
+
+    return score
+
+
+# ── Legacy API ─────────────────────────────────────────────────────
+
+def compute_impact(
+    graph: Graph,
+    target_qname: str,
+    max_hops: int = 4,
+    limit: int = 25,
+) -> dict[str, Any]:
+    """Compute impact of changes to a target symbol.
+
+    BFS from target, rank reachable nodes by blast radius signals.
+
+    Legacy API — prefers ``ImpactQuery`` + ``find_impact`` for new code.
+    """
+    target_id = graph.find_by_qname(target_qname)
+    if target_id is None:
+        return {"error": f"Symbol not found: {target_qname}", "results": []}
+
+    query = ImpactQuery(seed_id=target_id, max_hops=max_hops, limit=limit)
+    hits = find_impact(graph, query)
+
+    # Build path info
+    path_info: dict[int, list[str]] = {}
+    for hit in hits:
+        path_info[hit.id.value] = [hit.node.qualified_name]
+
+    return {
+        "target": target_qname,
+        "max_hops": max_hops,
+        "total_affected": len(hits),
+        "results": [
+            {
+                "node_id": h.id.value,
+                "qualified_name": h.node.qualified_name,
+                "kind": h.node.kind.value,
+                "name": h.node.name,
+                "score": round(h.score, 4),
+                "distance": h.distance,
+                "via": [e.value for e in h.via],
+                "path": path_info.get(h.id.value, []),
+            }
+            for h in hits
+        ],
+    }

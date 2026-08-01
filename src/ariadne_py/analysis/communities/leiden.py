@@ -1,40 +1,33 @@
-"""Leiden community detection — Louvain with refinement for guaranteed
+"""Leiden algorithm — Louvain with refinement for guaranteed
 well-connected communities.
 
-Mirrors the Rust ``leiden.rs`` module. This implementation uses
-networkx for the base Louvain algorithm and adds a refinement phase
-that splits poorly connected nodes, ensuring every community is
-connected.
+Mirrors the Rust ``leiden.rs`` module. This is a full multi-level
+implementation with:
+- Multi-level Louvain as base
+- Leiden-style refinement: local-move within communities with
+  well-connectedness threshold
+- Connectivity enforcement via undirected BFS
+- Modularity gain tracking for O(E) per pass
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import Any
 
-import networkx as nx
-
+from ...core.edge import EdgeKind
 from ...core.graph import Graph
 from ...core.id import NodeId
+from .core import (
+    CommunityOptions,
+    WorkingGraph,
+    aggregate,
+    densify,
+    enforce_connected,
+    identity_labels,
+    relabel,
+)
 from .utils import _find_community, _to_networkx
-
-
-class CommunityOptions:
-    """Options for community detection algorithms."""
-
-    def __init__(
-        self,
-        max_levels: int = 10,
-        max_passes: int = 10,
-        resolution: float = 1.0,
-        min_modularity_gain: float = 1e-8,
-        well_connectedness: float = 0.3,
-    ) -> None:
-        self.max_levels = max_levels
-        self.max_passes = max_passes
-        self.resolution = resolution
-        self.min_modularity_gain = min_modularity_gain
-        self.well_connectedness = well_connectedness
 
 
 def leiden(
@@ -46,204 +39,317 @@ def leiden(
     Guarantees well-connected communities by refining each partition
     to split poorly connected nodes.
 
+    Mirrors Rust ``leiden`` (leiden.rs:5-7).
+
     Args:
         graph: The code graph.
         options: Detection options. Defaults to CommunityOptions().
 
     Returns:
-        Mapping from node index to community id.
+        Mapping from node index to community id (set-based).
     """
     if options is None:
         options = CommunityOptions()
-
-    nx_graph = _to_networkx(graph)
-    ug = nx_graph.to_undirected()
-
-    # Base Louvain
-    try:
-        from networkx.algorithms.community import greedy_modularity_communities
-        communities = list(greedy_modularity_communities(ug, weight="weight"))
-    except Exception:
-        # Fallback: singletons
-        return {i: {n} for i, n in enumerate(ug.nodes())}
-
-    # Convert to index → community map
-    initial: dict[int, int] = {}
-    for cid, comm in enumerate(communities):
-        for nid in comm:
-            initial[nid] = cid
-
-    # Refinement phase: split poorly connected nodes
-    refined = refinement_phase(ug, initial, options)
-
-    # Enforce connectedness
-    enforced = enforce_connected(ug, refined)
-
-    # Densify: relabel to consecutive integers
-    return densify(enforced)
+    return leiden_with_options(graph, options)
 
 
-def refinement_phase(
-    graph: nx.Graph,
-    partition: dict[int, int],
+def leiden_with_options(
+    graph: Graph,
     options: CommunityOptions,
-) -> dict[int, int]:
-    """Refine partition by splitting poorly connected nodes.
+) -> dict[int, set[int]]:
+    """Leiden with explicit options.
+
+    Mirrors Rust ``leiden_with_options`` (leiden.rs:9-20).
+    """
+    working = WorkingGraph.from_graph(graph)
+    if working.total_weight <= 0.0:
+        nodes = list(working.original_nodes())
+        return {nid: i for i, nid in enumerate(nodes)}
+
+    final_labels = _run_multilevel_leiden(working, options)
+    return {nid: label for nid, label in relabel(final_labels).items()}
+
+
+def _run_multilevel_leiden(
+    working: WorkingGraph,
+    options: CommunityOptions,
+) -> dict[NodeId, int]:
+    """Multi-level Leiden: local-move → refinement → aggregate → repeat.
+
+    Mirrors Rust ``run_multilevel_leiden`` (leiden.rs:22-55).
+    """
+    current: dict[NodeId, int] = {
+        nid: i for i, nid in enumerate(working.original_nodes())
+    }
+
+    for _ in range(options.max_levels):
+        partition = _local_move(working, options)
+        moved = len(set(partition)) < working.len()
+
+        aggregation_partition = _refinement_phase(working, partition, options)
+
+        for nid in current:
+            for super_idx, members in enumerate(working.members):
+                if nid in members:
+                    current[nid] = aggregation_partition[super_idx]
+                    break
+
+        if not moved:
+            return current
+
+        working = aggregate(working, aggregation_partition)
+        if working.len() <= 1:
+            break
+
+    return current
+
+
+def _local_move(working: WorkingGraph, options: CommunityOptions) -> list[int]:
+    """Multi-level local move for modularity optimization.
+
+    Identical to Louvain's local_move since Leiden uses the same
+    modularity gain calculation — the difference is in the refinement
+    phase and connectivity enforcement.
+
+    Mirrors Rust ``local_move`` (leiden.rs:57-120).
+    """
+    n = working.len()
+    comm: list[int] = list(range(n))
+    comm_degree: list[float] = list(working.degree)
+    comm_size: list[float] = [len(m) for m in working.members]
+    two_m = 2.0 * working.total_weight
+
+    if two_m <= 0.0:
+        return comm
+
+    for _ in range(options.max_passes):
+        moved = False
+        for u in range(n):
+            current = comm[u]
+            node_degree = working.degree[u]
+            if node_degree == 0.0:
+                continue
+
+            node_mass = float(len(working.members[u]))
+
+            comm_degree[current] -= node_degree
+            comm_size[current] -= node_mass
+
+            weight_to_comm: dict[int, float] = defaultdict(float)
+            for v, w in working.adj[u]:
+                weight_to_comm[comm[v]] += w
+
+            best = current
+            best_gain = options.min_modularity_gain
+
+            # Stay gain
+            stay_weight = weight_to_comm.get(current, 0.0)
+            stay_gain = stay_weight - options.resolution * node_degree * comm_degree[current] / two_m
+            if stay_gain > best_gain:
+                best_gain = stay_gain
+                best = current
+
+            for candidate, edge_weight in weight_to_comm.items():
+                if candidate == current:
+                    continue
+                gain = edge_weight - options.resolution * node_degree * comm_degree[candidate] / two_m
+                if gain > best_gain:
+                    best_gain = gain
+                    best = candidate
+
+            comm[u] = best
+            comm_degree[best] += node_degree
+            comm_size[best] += node_mass
+            if best != current:
+                moved = True
+
+        if not moved:
+            break
+
+    return comm
+
+
+def _refinement_phase(
+    working: WorkingGraph,
+    partition: list[int],
+    options: CommunityOptions,
+) -> list[int]:
+    """Leiden-style refinement: split poorly connected nodes.
+
+    Mirrors Rust ``refinement_phase`` (leiden.rs:122-229).
 
     Within each community, runs local-move to split nodes whose edge
-    weight into the sub-community is below the well-connectedness threshold.
+    weight into the sub-community is below the well-connectedness
+    threshold.
 
     Args:
-        graph: Undirected networkx graph.
-        partition: Node → community mapping.
+        working: The working graph.
+        partition: Current community assignment.
         options: Detection options.
 
     Returns:
-        Refined node → community mapping.
+        Refined partition as dense label list.
     """
+    n = working.len()
+    two_m = 2.0 * working.total_weight
+
+    if two_m <= 0.0:
+        return list(partition)
+
     # Group nodes by parent community
     by_parent: dict[int, list[int]] = defaultdict(list)
-    for nid, cid in partition.items():
-        by_parent[cid].append(nid)
+    for u, c in enumerate(partition):
+        by_parent[c].append(u)
 
-    parents = sorted(by_parent.items(), key=lambda x: x[0])
-    labels = {nid: 0 for nid in graph.nodes()}
+    parents = sorted(by_parent.items(), key=lambda kv: kv[0])
+
+    # Precompute parent degrees
+    parent_degree: dict[int, float] = defaultdict(float)
+    for u, c in enumerate(partition):
+        parent_degree[c] += working.degree[u]
+
+    # Allocate label ranges
+    label_base: list[int] = []
     cursor = 0
+    for _, members in parents:
+        label_base.append(cursor)
+        cursor += len(members)
 
-    for parent_id, members in parents:
+    total_labels = cursor
+
+    # Refine each parent community
+    per_parent_labels: list[list[int]] = []
+
+    for idx, (parent, members) in enumerate(parents):
+        base = label_base[idx]
+        parent_total = parent_degree.get(parent, 0.0)
+
         if len(members) <= 1:
-            labels[members[0]] = cursor
-            cursor += 1
+            per_parent_labels.append([base])
             continue
 
-        # Local labels in [base, base + members.len)
-        base = cursor
-        refined: dict[int, int] = {u: base + i for i, u in enumerate(members)}
         member_set = set(members)
 
-        # Precompute parent degree
-        parent_degree = sum(graph.degree[m] for m in members)
+        # Local refined labels: [base, base + len(members))
+        refined: dict[int, int] = {u: base + i for i, u in enumerate(members)}
+        local_degree: dict[int, float] = {base + i: working.degree[u] for i, u in enumerate(members)}
+        local_size: dict[int, float] = {base + i: float(len(working.members[u])) for i, u in enumerate(members)}
 
         for _ in range(options.max_passes):
             moved = False
             for u in members:
-                current = refined[u]
-                node_degree = graph.degree[u]
-                if node_degree == 0:
+                current_label = refined[u]
+                node_degree = working.degree[u]
+                node_mass = float(len(working.members[u]))
+                if node_degree == 0.0:
                     continue
 
-                # Weight to each local community
+                # Remove u from current local community
+                local_degree[current_label] -= node_degree
+                local_size[current_label] -= node_mass
+
+                # Compute weight to each local community
                 weight_to_comm: dict[int, float] = defaultdict(float)
-                for v in graph.neighbors(u):
+                for v, w in working.adj[u]:
                     if v not in member_set:
                         continue
-                    w = graph[u][v].get("weight", 1.0)
                     weight_to_comm[refined[v]] += w
 
-                best = current
+                best = current_label
                 best_gain = options.min_modularity_gain
 
                 # Stay gain
-                stay_weight = weight_to_comm.get(current, 0.0)
-                if stay_weight > best_gain:
-                    best_gain = stay_weight
-                    best = current
+                stay_weight = weight_to_comm.get(current_label, 0.0)
+                stay_gain = stay_weight - options.resolution * node_degree * local_degree[current_label] / two_m
+                if stay_gain > best_gain:
+                    best_gain = stay_gain
+                    best = current_label
 
-                # Try each candidate
-                for candidate, edge_weight in weight_to_comm.items():
-                    if candidate == current:
+                for target, weight in weight_to_comm.items():
+                    if target == current_label:
                         continue
 
-                    threshold = 0.0
-                    if parent_degree > 0 and options.well_connectedness > 0:
-                        cand_degree = sum(graph.degree[v] for v in graph.nodes() if refined[v] == candidate)
-                        threshold = (
-                            options.well_connectedness
-                            * cand_degree
-                            * (parent_degree - cand_degree)
-                            / (2 * parent_degree)
+                    gain = weight - options.resolution * node_degree * local_degree[target] / two_m
+
+                    # Well-connectedness threshold
+                    if options.well_connectedness > 0.0 and parent_total > 0.0 and local_degree[target] > 0.0:
+                        w_ratio = weight / local_degree[target]
+                        wc_threshold = options.well_connectedness * (
+                            stay_weight / two_m
+                            - node_degree * local_degree[current_label] / two_m
+                            + node_mass * local_size[current_label] / two_m
                         )
+                        if not (gain > best_gain and w_ratio >= wc_threshold):
+                            continue
 
-                    if edge_weight < threshold:
-                        continue
-                    if edge_weight > best_gain:
-                        best_gain = edge_weight
-                        best = candidate
+                    if gain > best_gain:
+                        best_gain = gain
+                        best = target
 
-                if best != current:
+                if best != current_label:
                     refined[u] = best
                     moved = True
+
+                # Restore u's contribution
+                local_degree[current_label] += node_degree
+                local_size[current_label] += node_mass
 
             if not moved:
                 break
 
-        for u in members:
-            labels[u] = refined[u]
+        per_parent_labels.append([refined[u] for u in members])
 
-        cursor += len(members)
+    # Assemble global result
+    result: list[int] = [total_labels] * n
+    for idx, (_, members) in enumerate(parents):
+        for u, label in zip(members, per_parent_labels[idx]):
+            result[u] = label
 
-    return labels
-
-
-def enforce_connected(graph: nx.Graph, partition: dict[int, int]) -> dict[int, int]:
-    """Ensure every community is connected.
-
-    Disconnected communities are merged with their largest connected
-    component.
-
-    Args:
-        graph: Undirected networkx graph.
-        partition: Node → community mapping.
-
-    Returns:
-        Enforced node → community mapping.
-    """
-    communities: dict[int, list[int]] = defaultdict(list)
-    for nid, cid in partition.items():
-        communities[cid].append(nid)
-
-    enforced: dict[int, int] = {}
-    cursor = 0
-
-    for cid, nodes in sorted(communities.items()):
-        if len(nodes) <= 1:
-            enforced[nodes[0]] = cursor
-            cursor += 1
-            continue
-
-        # Find largest connected component
-        subgraph = graph.subgraph(nodes)
-        try:
-            components = list(nx.connected_components(subgraph))
-            largest = max(components, key=len)
-        except Exception:
-            largest = set(nodes)
-
-        # Assign all nodes in this component the same label
-        for nid in nodes:
-            enforced[nid] = cursor
-
-        cursor += 1
-
-    return enforced
-
-
-def densify(partition: dict[int, int]) -> dict[int, set[int]]:
-    """Relabel communities to consecutive integers and return set mapping.
-
-    Args:
-        partition: Node → community mapping.
-
-    Returns:
-        Community id → set of node indices.
-    """
-    communities: dict[int, set[int]] = defaultdict(set)
-    for nid, cid in partition.items():
-        communities[cid].add(nid)
-
-    # Relabel to consecutive
-    result: dict[int, set[int]] = {}
-    for new_id, old_id in enumerate(sorted(communities.keys())):
-        result[new_id] = communities[old_id]
+    # Enforce connectivity (Leiden guarantee)
+    enforce_connected(working, result)
+    result = densify(result)
 
     return result
+
+
+# ── Public API ───────────────────────────────────────────────────────
+
+
+def detect_communities(
+    graph: Graph,
+    algorithm: str = "leiden",
+) -> dict[str, Any]:
+    """Detect communities using Leiden algorithm.
+
+    Returns community assignments, quality metrics, and cross-community edges.
+    """
+    communities = leiden_with_options(graph, CommunityOptions())
+
+    ug = _to_networkx(graph).to_undirected()
+    quality = _modularity(ug, communities)
+    cross_edges = _find_cross_community_edges(graph, communities)
+
+    return {
+        "algorithm": algorithm,
+        "quality": quality,
+        "community_count": len(set_communities),
+        "communities": [
+            {
+                "id": cid,
+                "size": len(nodes),
+                "nodes": [
+                    {
+                        "qualified_name": graph.node(NodeId(nid)).qualified_name
+                        if graph.node(NodeId(nid))
+                        else f"node:{nid}",
+                        "kind": graph.node(NodeId(nid)).kind.value
+                        if graph.node(NodeId(nid))
+                        else "unknown",
+                    }
+                    for nid in sorted(list(nodes))[:20]
+                ],
+            }
+            for cid, nodes in sorted(communities.items())
+        ],
+        "cross_community_edges": cross_edges,
+    }

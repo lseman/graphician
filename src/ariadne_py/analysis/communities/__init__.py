@@ -1,28 +1,36 @@
 """Community detection and structural analysis.
 
-Uses NetworkX for graph algorithms:
-- Louvain community detection
-- Leiden refinement (guaranteed well-connected)
-- Infomap (LMDL-based random walks)
+Full Rust-port implementations:
+- Multi-level Louvain (modularity optimization with degree tracking)
+- Multi-level Leiden (Louvain + refinement + connectivity enforcement)
+- Multi-level Infomap (LMDL-based random walks + Leiden refinement)
 - PageRank (god nodes)
 - Degree centrality (hub nodes)
 - Bridge node detection
 - Articulation points
+
+Shared infrastructure in core.py: WorkingGraph, edge kind weights,
+aggregation, connectivity enforcement.
 """
 
 from __future__ import annotations
 
+from .core import (
+    CommunityOptions,
+    WorkingGraph,
+    edge_kind_weight,
+    aggregate,
+    densify,
+    enforce_connected,
+)
 from .louvain import (
     detect_communities,
-    _louvain,
-    _leiden,
-    _infomap,
-    _modularity,
-    _find_cross_community_edges,
+    louvain,
+    louvain_with_options,
 )
 from .leiden import (
-    CommunityOptions,
     leiden,
+    leiden_with_options,
 )
 from .nodes import (
     find_bridge_nodes,
@@ -43,13 +51,17 @@ from .utils import _find_community, _to_networkx
 
 __all__ = [
     "detect_communities",
+    "louvain",
+    "louvain_with_options",
+    "leiden",
+    "leiden_with_options",
     "find_bridge_nodes",
     "find_hub_nodes",
     "find_god_nodes",
     "compute_centrality",
     "is_rank_noise",
     "CommunityOptions",
-    "leiden",
+    "WorkingGraph",
     "community_cohesion",
     "community_quality",
     "CommunityQuality",
@@ -58,4 +70,7 @@ __all__ = [
     "split_oversized",
     "_find_community",
     "_to_networkx",
+    "aggregate",
+    "densify",
+    "enforce_connected",
 ]

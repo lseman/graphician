@@ -9,7 +9,10 @@ import networkx as nx
 
 from ...core.graph import Graph
 from ...core.id import NodeId
-from .louvain import _leiden
+from ...core.node import Node, NodeKind
+from ...core.edge import Edge, EdgeKind
+from .leiden import leiden_with_options
+from .core import CommunityOptions
 
 
 def split_oversized(
@@ -23,26 +26,21 @@ def split_oversized(
     Returns updated community assignments and split details.
     """
     # Get initial communities
-    nx_graph = _to_networkx(graph)
-    initial_communities: dict[int, set[int]] = _leiden(nx_graph)
+    initial_communities = leiden_with_options(graph, CommunityOptions(max_passes=10, max_levels=5))
     total_nodes = graph.nodes().__length_hint__() if hasattr(graph.nodes(), '__length_hint__') else sum(1 for _ in graph.nodes())
     threshold = max(int(total_nodes * threshold_pct), min_size)
 
-    # Build community membership
-    size_map: dict[int, list[int]] = defaultdict(list)
-    for cid, nodes in initial_communities.items():
-        for nid in nodes:
-            size_map[cid].append(nid)
+    # Build community membership (node_id -> cid)
+    size_map: dict[int, list[NodeId]] = defaultdict(list)
+    for nid, cid in initial_communities.items():
+        size_map[cid].append(nid)
 
     # Assign new IDs for split communities
-    max_cid = max(initial_communities.keys()) if initial_communities else 0
+    max_cid = max(initial_communities.values()) if initial_communities else 0
     next_id = max_cid + 1000
 
     # Result starts as initial assignment
-    result: dict[int, int] = {}
-    for cid, nodes in initial_communities.items():
-        for nid in nodes:
-            result[nid] = cid
+    result: dict[NodeId, int] = dict(initial_communities)
 
     splits: list[dict[str, Any]] = []
 
@@ -50,30 +48,33 @@ def split_oversized(
         if len(members) <= threshold:
             continue
 
-        # Build subgraph and run Leiden again
-        sub_nx = nx_graph.subgraph(members).copy()
-        sub_communities: dict[int, set[int]] = _leiden(sub_nx)
+        # Build subgraph from members
+        sub_graph = _build_subgraph(graph, members)
 
-        for sub_cid, sub_members in sub_communities.items():
+        # Run Leiden on subgraph
+        sub_communities = leiden_with_options(sub_graph, CommunityOptions(max_passes=10, max_levels=5))
+
+        # Map sub-community IDs to new global IDs
+        for sub_cid in sorted(sub_communities.values()):
+            sub_members = [nid for nid, c in sub_communities.items() if c == sub_cid]
             if len(sub_members) >= min_size:
                 new_cid = next_id
                 next_id += 1
             else:
                 new_cid = cid
-
             for nid in sub_members:
                 result[nid] = new_cid
 
         splits.append({
             "original_community": cid,
             "original_size": len(members),
-            "sub_communities": len(sub_communities),
+            "sub_communities": len(set(sub_communities.values())),
         })
 
-    # Convert result to dict format for response
-    new_communities: dict[int, list[int]] = defaultdict(list)
+    # Convert result to set-based format
+    new_communities: dict[int, set[NodeId]] = defaultdict(set)
     for nid, cid in result.items():
-        new_communities[cid].append(nid)
+        new_communities[cid].add(nid)
 
     return {
         "operation": "split_oversized",
@@ -85,21 +86,25 @@ def split_oversized(
     }
 
 
-def _to_networkx(graph: Graph) -> nx.DiGraph:
-    """Convert Ariadne Graph to NetworkX DiGraph."""
-    nx_graph = nx.DiGraph()
+def _build_subgraph(graph: Graph, member_ids: list[NodeId]) -> Graph:
+    """Build a subgraph containing only the specified members and edges between them."""
+    member_set = set(nid.value for nid in member_ids)
+    node_map: dict[NodeId, NodeId] = {}
 
-    for nid, node in graph.nodes():
-        nx_graph.add_node(nid.value, **{
-            "qualified_name": node.qualified_name,
-            "kind": node.kind.value,
-            "name": node.name,
-        })
+    sub_graph = Graph()
 
-    for _, src, dst, edge in graph.edges():
-        nx_graph.add_edge(src.value, dst.value, **{
-            "kind": edge.kind.value,
-            "confidence": edge.confidence.value,
-        })
+    # Add nodes
+    for nid in member_ids:
+        node = graph.node(nid)
+        if node is not None:
+            new_nid = sub_graph.add_node(node)
+            node_map[nid] = new_nid
 
-    return nx_graph
+    # Add edges between members
+    for nid in member_ids:
+        for src, dst, edge in graph.outgoing(nid):
+            if dst.value in member_set:
+                if src in node_map and dst in node_map:
+                    sub_graph.add_edge(node_map[src], node_map[dst], edge)
+
+    return sub_graph

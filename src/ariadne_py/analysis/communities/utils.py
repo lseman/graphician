@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import networkx as nx
+from typing import Any
 
 from ...core.graph import Graph
 from ...core.id import NodeId
@@ -35,3 +36,32 @@ def _to_networkx(graph: Graph) -> nx.DiGraph:
         })
 
     return nx_graph
+
+
+def _modularity(graph: nx.DiGraph, communities: dict[int, set[int]]) -> float:
+    """Compute modularity of community assignment."""
+    ug = graph.to_undirected()
+    try:
+        return nx.algorithms.community.modularity(ug, communities.values())
+    except Exception:
+        return 0.0
+
+
+def _find_cross_community_edges(
+    graph: Graph,
+    communities: dict[int, set[int]],
+) -> list[dict[str, Any]]:
+    """Find edges that cross community boundaries."""
+    cross: list[dict[str, Any]] = []
+    for _, src, dst, edge in graph.edges():
+        src_comm = _find_community(src.value, communities)
+        dst_comm = _find_community(dst.value, communities)
+        if src_comm != dst_comm:
+            cross.append({
+                "source": graph.node(src).qualified_name if graph.node(src) else "?",
+                "target": graph.node(dst).qualified_name if graph.node(dst) else "?",
+                "kind": edge.kind.value,
+                "from_community": src_comm,
+                "to_community": dst_comm,
+            })
+    return cross[:50]  # Limit

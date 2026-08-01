@@ -6,6 +6,7 @@ from typing import Any
 
 import networkx as nx
 
+from ...core.edge import Confidence, EdgeKind
 from ...core.graph import Graph
 from ...core.id import NodeId
 from ...core.node import Node, NodeKind
@@ -140,3 +141,18 @@ def compute_centrality(
             )[:30]
         },
     }
+
+
+def is_rank_noise(node: Node) -> bool:
+    """True for nodes that inflate god-node rankings without representing a real symbol.
+
+    Filters out file containers (high degree purely from Defines edges),
+    synthetic flow and hyperedge nodes, and unresolved call placeholders.
+
+    Mirrors the Rust ``is_rank_noise`` from ``centrality.rs``.
+    """
+    if node.kind in (NodeKind.FILE, NodeKind.FLOW, NodeKind.HYPEREDGE):
+        return True
+    if node.qualified_name.startswith("call::"):
+        return True
+    return False

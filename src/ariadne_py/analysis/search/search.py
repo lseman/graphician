@@ -129,7 +129,7 @@ def hybrid_search(
     return task_aware_search(graph, query, limit=limit)
 
 
-def fts_ranked_search(
+def token_overlap_search(
     graph: Graph,
     query: str,
     limit: int = 20,

@@ -110,3 +110,35 @@ class FTSIndex:
     def optimize(self) -> None:
         """Optimize the FTS index."""
         self.conn.execute("INSERT INTO nodes_fts(nodes_fts) VALUES('optimize')")
+
+    def search_safe(self, query: str, limit: int = 20, offset: int = 0) -> list[FTSResult]:
+        """Search the FTS5 index with a safe, parameterized query.
+
+        Uses ``build_fts5_query`` internally to sanitize the raw input.
+        """
+        safe_query = build_fts5_query(query)
+        if not safe_query:
+            return []
+        return self.search(safe_query, limit=limit, offset=offset)
+
+
+def build_fts5_query(raw: str) -> str:
+    """Build a safe FTS5 MATCH expression from a raw user query.
+
+    Each whitespace/punctuation-separated token becomes a prefix term
+    (``token*``).  Special FTS5 syntax characters are stripped to
+    prevent query parse errors.
+
+    Mirrors the Rust ``build_fts5_query`` from ``persistence/sql.rs``.
+    """
+    import re
+
+    # Split on non-alphanumeric/non-underscore boundaries
+    raw_tokens = re.split(r'[^a-zA-Z0-9_]+', raw)
+    tokens: list[str] = []
+    for raw_token in raw_tokens:
+        # Strip special FTS5 characters and collect non-empty tokens
+        clean = re.sub(r'[^a-zA-Z0-9_]', '', raw_token)
+        if clean:
+            tokens.append(f"{clean}*")
+    return " ".join(tokens)

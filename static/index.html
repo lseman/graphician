@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ariadne Graph Explorer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sigma@3.0.0/dist/sigma.min.js"></script>
+    <script defer src="/app.js"></script>
+  </head>
+  <body>
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <div class="logo">Ariadne</div>
+      </div>
+      <div class="header-center">
+        <div class="search-container">
+          <svg class="search-icon" viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+          <input id="searchInput" type="text" placeholder="Search symbols, files…" autocomplete="off" />
+        </div>
+        <div id="searchResults" class="search-results"></div>
+      </div>
+      <div class="header-right">
+        <div class="stats">
+          <span id="nodeCount">0</span> nodes
+          <span id="edgeCount">0</span> edges
+        </div>
+        <button id="toggleHelp" class="icon-btn" title="Help">?</button>
+      </div>
+    </header>
+
+    <!-- Main Layout -->
+    <div class="main-layout">
+      <!-- Left Sidebar -->
+      <aside id="leftSidebar" class="sidebar sidebar-left">
+        <!-- Tab bar -->
+        <div class="sidebar-tabs">
+          <button class="tab-btn active" data-tab="files">Files</button>
+          <button class="tab-btn" data-tab="filters">Filters</button>
+        </div>
+
+        <!-- Files tab -->
+        <div id="tabFiles" class="tab-panel active">
+          <div class="sidebar-search">
+            <input id="fileSearch" type="text" placeholder="Filter files…" />
+          </div>
+          <div id="fileTree" class="file-tree"></div>
+        </div>
+
+        <!-- Filters tab -->
+        <div id="tabFilters" class="tab-panel">
+          <div class="filter-section">
+            <h3 class="filter-heading">Node Types</h3>
+            <div id="nodeTypeFilters" class="filter-list"></div>
+          </div>
+          <div class="filter-section">
+            <h3 class="filter-heading">Edge Types</h3>
+            <div id="edgeTypeFilters" class="filter-list"></div>
+          </div>
+          <div class="filter-section">
+            <h3 class="filter-heading">Focus Depth</h3>
+            <div class="depth-filters">
+              <button class="depth-btn active" data-depth="0">All</button>
+              <button class="depth-btn" data-depth="1">1 hop</button>
+              <button class="depth-btn" data-depth="2">2 hops</button>
+              <button class="depth-btn" data-depth="3">3 hops</button>
+            </div>
+          </div>
+          <div class="filter-section">
+            <h3 class="filter-heading">Legend</h3>
+            <div id="legend" class="legend-list"></div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Graph Canvas -->
+      <main class="graph-container">
+        <div id="graphCanvas" class="graph-canvas"></div>
+
+        <!-- Hover tooltip -->
+        <div id="hoverTooltip" class="tooltip hidden">
+          <div class="tooltip-name"></div>
+          <div class="tooltip-meta"></div>
+        </div>
+
+        <!-- Selection bar -->
+        <div id="selectionBar" class="selection-bar hidden">
+          <div class="selection-dot"></div>
+          <span id="selectionName" class="selection-name"></span>
+          <span id="selectionType" class="selection-type"></span>
+          <button id="clearSelection" class="clear-btn">×</button>
+        </div>
+
+        <!-- Graph controls -->
+        <div class="graph-controls">
+          <button class="control-btn" id="zoomIn" title="Zoom in">+</button>
+          <button class="control-btn" id="zoomOut" title="Zoom out">−</button>
+          <button class="control-btn" id="zoomFit" title="Fit view">⊡</button>
+          <div class="control-divider"></div>
+          <button class="control-btn" id="resetLayout" title="Re-run layout">↻</button>
+        </div>
+
+        <!-- Help modal -->
+        <div id="helpModal" class="modal hidden">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2>Shortcuts</h2>
+              <button id="closeHelp" class="modal-close">×</button>
+            </div>
+            <div class="modal-body">
+              <div class="shortcut-list">
+                <div class="shortcut-item"><kbd>⌘K</kbd> <span>Focus search</span></div>
+                <div class="shortcut-item"><kbd>Esc</kbd> <span>Clear selection</span></div>
+                <div class="shortcut-item"><kbd>Scroll</kbd> <span>Zoom</span></div>
+                <div class="shortcut-item"><kbd>Drag</kbd> <span>Pan</span></div>
+                <div class="shortcut-item"><kbd>Click</kbd> <span>Select node</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- Right Panel -->
+      <aside id="rightPanel" class="sidebar sidebar-right hidden">
+        <div class="sidebar-header">
+          <h3 class="sidebar-title">Details</h3>
+          <button id="closeRightPanel" class="icon-btn">×</button>
+        </div>
+        <div id="nodeDetails" class="node-details"></div>
+      </aside>
+    </div>
+  </body>
+</html>

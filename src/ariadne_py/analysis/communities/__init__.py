@@ -2,7 +2,8 @@
 
 Uses NetworkX for graph algorithms:
 - Louvain community detection
-- Leiden refinement
+- Leiden refinement (guaranteed well-connected)
+- Infomap (LMDL-based random walks)
 - PageRank (god nodes)
 - Degree centrality (hub nodes)
 - Bridge node detection
@@ -19,11 +20,16 @@ from .louvain import (
     _modularity,
     _find_cross_community_edges,
 )
+from .leiden import (
+    CommunityOptions,
+    leiden,
+)
 from .nodes import (
     find_bridge_nodes,
     find_hub_nodes,
     find_god_nodes,
     compute_centrality,
+    is_rank_noise,
 )
 from .quality import (
     CommunityQuality,
@@ -41,6 +47,9 @@ __all__ = [
     "find_hub_nodes",
     "find_god_nodes",
     "compute_centrality",
+    "is_rank_noise",
+    "CommunityOptions",
+    "leiden",
     "community_cohesion",
     "community_quality",
     "CommunityQuality",

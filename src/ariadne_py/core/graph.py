@@ -234,6 +234,35 @@ class Graph:
 
     # ── Internal helpers ─────────────────────────────────────────────
 
+    def clone(self) -> Graph:
+        """Deep-clone this graph."""
+        import copy
+        new = Graph()
+        new._nodes = {idx: copy.deepcopy(node) for idx, node in self._nodes.items()}
+        new._edges = {eid: (src, dst, copy.deepcopy(edge)) for eid, (src, dst, edge) in self._edges.items()}
+        new._by_qname = dict(self._by_qname)
+        new._out = {src: list(neighbors) for src, neighbors in self._out.items()}
+        new._in = {dst: list(neighbors) for dst, neighbors in self._in.items()}
+        new._next_node_id = self._next_node_id
+        new._next_edge_id = self._next_edge_id
+        return new
+
+    def edge_index(self, id: EdgeId) -> int | None:
+        """Return the internal index of an edge by its stable id, or None."""
+        if id.value in self._edges:
+            return id.value
+        return None
+
+    def remove_edge(self, id: EdgeId) -> None:
+        """Remove a single edge by its stable id."""
+        eid = id.value
+        if eid not in self._edges:
+            return
+        src, dst, _ = self._edges[eid]
+        self._out[src] = [(d, e) for d, e in self._out[src] if e != eid]
+        self._in[dst] = [(s, e) for s, e in self._in[dst] if e != eid]
+        del self._edges[eid]
+
     def _has_edge_kind(self, src: int, dst: int, kind: EdgeKind) -> bool:
         for d, eid in self._out.get(src, []):
             _, _, edge = self._edges[eid]

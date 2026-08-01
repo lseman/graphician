@@ -61,7 +61,7 @@ def find_impact(graph: Graph, query: ImpactQuery) -> list[ImpactHit]:
             node=node,
         ))
 
-    hits.sort(key=lambda h: h.score, reverse=True)
+    hits.sort(key=lambda h: (-h.score, h.distance))
     return hits[:query.limit]
 
 
@@ -115,19 +115,8 @@ def _node_kind_boost(kind: NodeKind) -> float:
 
 
 def _compute_score(node: Node, nid: NodeId, cost: float, distance: int) -> float:
-    """Compute impact score from cost, distance, and node kind."""
-    # Lower cost → higher score (inverse)
-    if cost == 0:
-        return 10.0
-    score = 1.0 / max(cost, 0.01)
-
-    # Node kind boost
-    score *= _node_kind_boost(node.kind)
-
-    # Distance decay
-    score *= 1.0 / (1.0 + distance * 0.5)
-
-    return score
+    """Compute impact score from cost and node kind."""
+    return _node_kind_boost(node.kind) / (1.0 + cost)
 
 
 # ── Legacy API ─────────────────────────────────────────────────────

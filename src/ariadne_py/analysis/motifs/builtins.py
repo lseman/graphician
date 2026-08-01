@@ -43,6 +43,6 @@ def doc_function_triangle() -> Motif:
         .add_node(lambda n: n.kind(NodeKind.CONCEPT))
         .add_edge(0, 2, EdgeKind.MENTIONS)
         .add_edge(2, 1, EdgeKind.MENTIONS)
-        .add_edge(0, 1, EdgeKind.DESCRIPTIONS)
+        .add_edge(0, 1, EdgeKind.DESCRIBES)
         .build()
     )

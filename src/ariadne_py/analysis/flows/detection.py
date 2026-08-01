@@ -13,9 +13,9 @@ from .entry_points import _is_python_framework_entry
 from .trace import _trace_flow, _compute_criticality, _is_test_node
 
 
-def compute_flows(
+def compute_flows_with_options(
     graph,
-    options: FlowOptions | None = None,
+    options: FlowOptions,
 ) -> int:
     """Detect entry points, trace flows, and materialise them into the graph.
 
@@ -99,3 +99,52 @@ def _detect_entry_points(graph) -> list[NodeId]:
         if not has_caller:
             entries.append(nid)
     return entries
+
+
+def all_flows(graph) -> list[NodeId]:
+    """Read-side helper: collect IDs of all Flow nodes, sorted by criticality desc."""
+    flows: list[tuple[NodeId, float, str]] = []
+    for nid, node in graph.nodes():
+        if node.kind != NodeKind.FLOW:
+            continue
+        crit = node.properties.get("criticality", 0.0)
+        if isinstance(crit, str):
+            try:
+                crit = float(crit)
+            except (ValueError, TypeError):
+                crit = 0.0
+        flows.append((nid, crit, node.qualified_name))
+    flows.sort(key=lambda x: (-x[1], x[2]))
+    return [nid for nid, _, _ in flows]
+
+
+def flows_through(graph, node: NodeId) -> list[NodeId]:
+    """Read-side helper: flows that contain `node`. Returns flow node ids."""
+    result: list[NodeId] = []
+    for flow_id, edge in graph.out_neighbors(node):
+        if edge.kind in (EdgeKind.MEMBER_OF, EdgeKind.ENTRY_OF):
+            result.append(flow_id)
+    return result
+
+
+def affected_flows(graph, changed: list[NodeId]) -> list[NodeId]:
+    """Read-side helper: union of flows_through over changed nodes, ranked by criticality."""
+    seen: set[NodeId] = set()
+    hits: list[tuple[NodeId, float, str]] = []
+    for n in changed:
+        for flow in flows_through(graph, n):
+            if flow in seen:
+                continue
+            seen.add(flow)
+            flow_node = graph.node(flow)
+            if flow_node is None:
+                continue
+            crit = flow_node.properties.get("criticality", 0.0)
+            if isinstance(crit, str):
+                try:
+                    crit = float(crit)
+                except (ValueError, TypeError):
+                    crit = 0.0
+            hits.append((flow, crit, flow_node.qualified_name))
+    hits.sort(key=lambda x: (-x[1], x[2]))
+    return [nid for nid, _, _ in hits]

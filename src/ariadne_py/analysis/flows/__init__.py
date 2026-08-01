@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from .types import FlowOptions
-from .detection import compute_flows, _detect_entry_points
+from .detection import (
+    compute_flows_with_options as compute_flows,
+    _detect_entry_points,
+)
 from .entry_points import (
     _is_framework_entry,
     _is_python_framework_entry,

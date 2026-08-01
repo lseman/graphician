@@ -4,6 +4,12 @@ Exposes Ariadne as an MCP tool with:
 - One tool: ariadne (operation + params)
 - Five prompt templates for structured agent workflows
 - JSON-RPC 2.0 over stdio
+
+Wired to the structured response system (``response/``) for:
+- Hint generation (workflow suggestions)
+- Response guardrails (pagination, hard limits)
+- Graph summary insertion
+- Caching (long-lived server mode)
 """
 
 from __future__ import annotations
@@ -46,6 +52,7 @@ from ...analysis.context_pack import build_context_pack
 from ...analysis.semsearch import EmbeddingIndex
 from ...analysis.dedup import deduplicate_nodes, DedupOptions, DedupResult
 from ...analysis.patterns import detect_patterns
+from ..cli.response import tool_response, tool_response_cached
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +181,11 @@ class AriadneMCP:
         params: dict[str, Any],
         msg_id: Any,
     ) -> dict[str, Any]:
-        """Handle a tool call."""
+        """Handle a tool call.
+
+        Uses the structured response system for hint generation,
+        guardrails, and caching (in server mode).
+        """
         self._ensure_initialized()
         if self.graph is None:
             return self._send_error(-32603, "Graph not loaded", msg_id)
@@ -183,7 +194,55 @@ class AriadneMCP:
         tool_params = params.get("params", {})
 
         try:
-            result = self._execute_operation(operation, tool_params)
+            # Use response system for operations it covers
+            response_ops = {
+                "status",
+                "search",
+                "context_pack",
+                "impact",
+                "detect_changes",
+                "risk",
+                "review_context",
+                "traverse",
+                "large_functions",
+                "bridge_nodes",
+                "cycles",
+                "core",
+                "articulation",
+                "gaps",
+                "surprises",
+                "diagnostics",
+                "counterfactual",
+                "suggested_questions",
+                "architecture_overview",
+                "architecture",
+                "god_nodes",
+                "flows",
+                "affected_flows",
+                "blast_radius",
+                "test_coverage",
+                "hub_nodes",
+                "community_split",
+                "dead_code",
+                "find_related",
+                "minimal_context",
+                "context",
+                "export_graphml",
+                "paths",
+                "rename_preview",
+                "snapshot_diff",
+                "token_savings",
+                "token_benchmark",
+            }
+
+            if operation in response_ops:
+                # Use structured response system (with hints, guardrails, caching)
+                use_cache = True  # Server mode: enable caching
+                result = tool_response_cached(self.db_path, operation, tool_params)
+            else:
+                # Fallback to legacy operation handlers
+                result = self._execute_operation(operation, tool_params)
+
             return {
                 "jsonrpc": "2.0",
                 "id": msg_id,

@@ -169,7 +169,6 @@ def main() -> None:
         "suggested-questions": "Suggested review questions",
         "dedup": "Deduplicate semantic nodes",
         "patterns": "Detect framework patterns",
-        "wiki": "Generate a graph wiki summary",
         "report": "Generate a graph analysis report",
         "rename-preview": "Preview a symbol rename",
         "token-savings": "Estimate token savings",
@@ -200,6 +199,16 @@ def main() -> None:
     external_p.add_argument("--base-url")
     external_p.add_argument("--batch-size", type=int, default=64)
 
+    # watch
+    watch_p = subparsers.add_parser("watch", help="Watch project and update graph")
+    watch_p.add_argument("path", nargs="?", default=".", help="Project root")
+    watch_p.add_argument("--interval", type=int, default=5, help="Poll interval (s, fallback)")
+
+    # serve
+    serve_p = subparsers.add_parser("serve", help="Start graph explorer HTTP server")
+    serve_p.add_argument("--bind", default="127.0.0.1:8080", help="Address:port to bind")
+    serve_p.add_argument("--algorithm", default="louvain", choices=["louvain", "leiden", "infomap"])
+
     # tool
     tool_p = subparsers.add_parser("tool", help="JSON tool interface")
     tool_p.add_argument("operation", help="Operation name")
@@ -207,6 +216,25 @@ def main() -> None:
 
     # mcp-server
     subparsers.add_parser("mcp-server", help="Start MCP server")
+
+    # wiki
+    wiki_p = subparsers.add_parser("wiki", help="Generate markdown wiki from communities")
+    wiki_p.add_argument("--output", default="docs/wiki", help="Output directory")
+    wiki_p.add_argument("--force", action="store_true", help="Overwrite existing files")
+
+    # daemon
+    daemon_p = subparsers.add_parser("daemon", help="Multi-repo daemon")
+    daemon_p.add_argument("subcommand", choices=["add", "start", "status"], help="Daemon subcommand")
+    daemon_p.add_argument("path", nargs="?", default=".", help="Repository path")
+    daemon_p.add_argument("--alias", default="", help="Repository alias")
+    daemon_p.add_argument("--interval", type=int, default=30, help="Poll interval (s)")
+
+    # install
+    install_p = subparsers.add_parser("install", help="Install git hooks and agent configs")
+    install_p.add_argument("path", nargs="?", default=".", help="Repository root")
+    install_p.add_argument("--force", action="store_true", help="Overwrite existing")
+    install_p.add_argument("--agents", action="store_true", help="Install AGENTS.md")
+    install_p.add_argument("--mcp", action="store_true", help="Install MCP configs")
 
     args = parser.parse_args()
 
@@ -253,6 +281,11 @@ def main() -> None:
         "rebuild-fts": cmd_rebuild_fts,
         "embed": cmd_embed,
         "embed-external": cmd_embed_external,
+        "watch": cmd_watch,
+        "serve": cmd_serve,
+        "wiki": cmd_wiki,
+        "daemon": cmd_daemon,
+        "install": cmd_install,
     }
 
     handler = commands.get(args.command)
@@ -731,6 +764,36 @@ def cmd_mcp_server(args: argparse.Namespace) -> None:
     from ..transport.mcp import AriadneMCP
     mcp = AriadneMCP()
     mcp.run()
+
+
+def cmd_watch(args: argparse.Namespace) -> None:
+    """Watch project and incrementally update graph."""
+    from .watch import cmd_watch as _watch
+    _watch(args.db, args.path, args.interval)
+
+
+def cmd_serve(args: argparse.Namespace) -> None:
+    """Start graph explorer HTTP server."""
+    from .serve import cmd_serve as _serve
+    _serve(args.db, args.bind, args.algorithm)
+
+
+def cmd_wiki(args: argparse.Namespace) -> None:
+    """Generate markdown wiki from communities."""
+    from .wiki import cmd_wiki as _wiki
+    _wiki(args.db, args.output, args.force)
+
+
+def cmd_daemon(args: argparse.Namespace) -> None:
+    """Multi-repo daemon."""
+    from .daemon import cmd_daemon as _daemon
+    _daemon(args.subcommand, args.db, args.path, args.alias, args.interval)
+
+
+def cmd_install(args: argparse.Namespace) -> None:
+    """Install git hooks and agent configs."""
+    from .daemon import cmd_install as _install
+    _install(args.db, args.path, args.force, args.agents, args.mcp)
 
 
 def _node_to_dict(graph: Graph, qname: str) -> dict[str, Any] | None:

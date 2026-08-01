@@ -2,6 +2,8 @@
 
 Stores nodes, edges, file hashes, and metadata in a single SQLite database.
 Supports incremental updates via file hash comparison.
+Includes schema migrations, versioned tables for temporal tracking,
+and confidence class tracking.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ import json
 import logging
 import os
 import sqlite3
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +23,35 @@ from ..core.id import EdgeId, NodeId
 from ..core.node import Node, NodeKind
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_EMBEDDING_MODEL: str = "ariadne-hash-v2"
+DEFAULT_EMBEDDING_DIM: int = 384
+
+
+@dataclass(frozen=True)
+class EdgeIdentity:
+    """Unique identity string for an edge (src_qname, dst_qname, kind)."""
+    src_qname: str
+    dst_qname: str
+    kind: EdgeKind
+
+    def to_string(self) -> str:
+        return f"{self.src_qname}\x1f{self.dst_qname}\x1f{self.kind.value}"
+
+
+def edge_identity(src_qname: str, dst_qname: str, kind: EdgeKind) -> EdgeIdentity:
+    """Create a unique edge identity string (src_qname, dst_qname, kind)."""
+    return EdgeIdentity(src_qname, dst_qname, kind)
+
+
+def parse_confidence(conf_class: str, confidence: float) -> Confidence:
+    """Parse confidence class from DB string to Confidence enum."""
+    if conf_class == "extracted":
+        return Confidence.EXTRACTED
+    elif conf_class == "ambiguous":
+        return Confidence.AMBIGUOUS
+    else:
+        return Confidence.INFERRED
 
 
 class GraphStore:
@@ -34,13 +66,43 @@ class GraphStore:
     - metadata: key, value
     """
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, read_only: bool = False) -> None:
         self.db_path = Path(db_path)
-        self._conn = sqlite3.connect(str(self.db_path))
+        flags = sqlite3.URI if str(db_path).startswith("file:") else 0
+        self._conn = sqlite3.connect(str(self.db_path), uri=(flags != 0))
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._init_schema()
+        self._migrate_v1()
+
+    def _migrate_v1(self) -> None:
+        """Apply schema migrations for older databases.
+
+        Migration v1→v2: adds source_text column to nodes and node_versions,
+        and updates schema_version metadata.
+        """
+        try:
+            has_column = self._conn.execute(
+                "SELECT COUNT(*) FROM pragma_table_info('nodes') WHERE name='source_text'"
+            ).fetchone()[0]
+        except Exception:
+            has_column = 0
+        if has_column == 0:
+            try:
+                self._conn.execute("ALTER TABLE nodes ADD COLUMN source_text TEXT")
+            except Exception:
+                pass
+            try:
+                self._conn.execute("ALTER TABLE node_versions ADD COLUMN source_text TEXT")
+            except Exception:
+                pass
+            try:
+                self._conn.execute("UPDATE metadata SET value='2' WHERE key='schema_version'")
+            except Exception:
+                pass
+            self._set_metadata("schema_version", "2")
 
     def _init_schema(self) -> None:
         """Create tables if they don't exist."""
@@ -49,21 +111,26 @@ class GraphStore:
                 node_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 kind TEXT NOT NULL,
                 name TEXT NOT NULL,
-                qualified_name TEXT UNIQUE NOT NULL,
+                qualified_name TEXT NOT NULL UNIQUE,
                 source_uri TEXT,
                 line_start INTEGER,
                 line_end INTEGER,
-                properties TEXT DEFAULT '{}',
-                source_text TEXT,
+                properties TEXT NOT NULL DEFAULT '{}',
                 valid_from TEXT,
-                valid_to TEXT
+                valid_to TEXT,
+                source_text TEXT
             );
+            CREATE INDEX IF NOT EXISTS idx_nodes_kind ON nodes(kind);
+            CREATE INDEX IF NOT EXISTS idx_nodes_qname ON nodes(qualified_name);
+            CREATE INDEX IF NOT EXISTS idx_nodes_source ON nodes(source_uri);
+            CREATE INDEX IF NOT EXISTS idx_nodes_valid ON nodes(valid_from, valid_to);
 
             CREATE TABLE IF NOT EXISTS edges (
                 edge_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 kind TEXT NOT NULL,
-                confidence TEXT NOT NULL DEFAULT 'extracted',
-                properties TEXT DEFAULT '{}',
+                confidence REAL NOT NULL DEFAULT 1.0,
+                conf_class TEXT NOT NULL DEFAULT 'extracted',
+                properties TEXT NOT NULL DEFAULT '{}',
                 valid_from TEXT,
                 valid_to TEXT,
                 source_id INTEGER NOT NULL,
@@ -71,16 +138,56 @@ class GraphStore:
                 source_qname TEXT NOT NULL,
                 target_qname TEXT NOT NULL
             );
-
+            CREATE INDEX IF NOT EXISTS idx_edges_src ON edges(source_id);
+            CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(target_id);
             CREATE INDEX IF NOT EXISTS idx_edges_kind ON edges(kind);
-            CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id);
-            CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id);
-            CREATE INDEX IF NOT EXISTS idx_nodes_qname ON nodes(qualified_name);
-            CREATE INDEX IF NOT EXISTS idx_nodes_kind ON nodes(kind);
+            CREATE INDEX IF NOT EXISTS idx_edges_valid ON edges(valid_from, valid_to);
 
-            CREATE TABLE IF NOT EXISTS file_hashes (
-                file_path TEXT PRIMARY KEY,
-                hash TEXT NOT NULL
+            CREATE TABLE IF NOT EXISTS node_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                name TEXT NOT NULL,
+                qualified_name TEXT NOT NULL,
+                source_uri TEXT,
+                line_start INTEGER,
+                line_end INTEGER,
+                properties TEXT NOT NULL DEFAULT '{}',
+                valid_from TEXT,
+                valid_to TEXT,
+                source_text TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_node_versions_qname ON node_versions(qualified_name);
+            CREATE INDEX IF NOT EXISTS idx_node_versions_source ON node_versions(source_uri);
+            CREATE INDEX IF NOT EXISTS idx_node_versions_valid ON node_versions(valid_from, valid_to);
+
+            CREATE TABLE IF NOT EXISTS edge_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                src_qname TEXT NOT NULL,
+                dst_qname TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                conf_class TEXT NOT NULL,
+                properties TEXT NOT NULL DEFAULT '{}',
+                source_uri TEXT,
+                valid_from TEXT,
+                valid_to TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_edge_versions_src ON edge_versions(src_qname);
+            CREATE INDEX IF NOT EXISTS idx_edge_versions_dst ON edge_versions(dst_qname);
+            CREATE INDEX IF NOT EXISTS idx_edge_versions_kind ON edge_versions(kind);
+            CREATE INDEX IF NOT EXISTS idx_edge_versions_valid ON edge_versions(valid_from, valid_to);
+
+            CREATE TABLE IF NOT EXISTS embeddings (
+                node_id INTEGER PRIMARY KEY,
+                model TEXT NOT NULL,
+                vector BLOB NOT NULL
+            );
+
+            -- File state with index timestamp.
+            CREATE TABLE IF NOT EXISTS file_state (
+                path TEXT PRIMARY KEY,
+                hash TEXT NOT NULL,
+                indexed_at_unix INTEGER NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS metadata (
@@ -88,6 +195,7 @@ class GraphStore:
                 value TEXT NOT NULL
             );
 
+            -- Durable snapshots.
             CREATE TABLE IF NOT EXISTS graph_snapshots (
                 snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 label TEXT UNIQUE NOT NULL,
@@ -95,16 +203,12 @@ class GraphStore:
                 payload TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS embeddings (
-                qualified_name TEXT NOT NULL,
-                model TEXT NOT NULL,
-                vector TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (qualified_name, model)
+            -- FTS5 index for full-text search.
+            CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+                kind,
+                name,
+                qualified_name
             );
-
-            -- Standalone FTS5 table for full-text search.
-            -- Synced from nodes table during save/rebuild.
         """)
         fts_columns = {
             row[1] for row in self._conn.execute("PRAGMA table_info(nodes_fts)").fetchall()
@@ -165,11 +269,12 @@ class GraphStore:
 
             # Update file hashes
             if file_hashes:
-                self._conn.execute("DELETE FROM file_hashes")
+                self._conn.execute("DELETE FROM file_state")
+                now_unix = int(_now_unix())
                 for path, hash_val in file_hashes.items():
                     self._conn.execute(
-                        "INSERT OR REPLACE INTO file_hashes (file_path, hash) VALUES (?, ?)",
-                        (path, hash_val),
+                        "INSERT OR REPLACE INTO file_state (path, hash, indexed_at_unix) VALUES (?, ?, ?)",
+                        (path, hash_val, now_unix),
                     )
 
             # Update metadata
@@ -237,13 +342,16 @@ class GraphStore:
         target_qname: str,
     ) -> None:
         """Insert an edge."""
+        conf_class = edge.confidence.class_name() if hasattr(edge.confidence, 'class_name') else _confidence_class_name(edge.confidence)
+        conf_score = edge.confidence.score() if hasattr(edge.confidence, 'score') else 1.0
         self._conn.execute(
             """INSERT INTO edges
-               (kind, confidence, properties, valid_from, valid_to, source_id, target_id, source_qname, target_qname)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (kind, confidence, conf_class, properties, valid_from, valid_to, source_id, target_id, source_qname, target_qname)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 edge.kind.value,
-                edge.confidence.value,
+                conf_score,
+                conf_class,
                 json.dumps(edge.properties),
                 edge.valid_from,
                 edge.valid_to,
@@ -299,7 +407,8 @@ class GraphStore:
 
     def _edge_row_to_edge(self, row: sqlite3.Row) -> Edge:
         """Convert a database row to an Edge."""
-        confidence = Confidence(row["confidence"])
+        conf_class = row.get("conf_class", "extracted")
+        confidence = parse_confidence(conf_class, row["confidence"])
         return Edge(
             kind=EdgeKind(row["kind"]),
             confidence=confidence,
@@ -308,18 +417,39 @@ class GraphStore:
             valid_to=row["valid_to"],
         )
 
-    # ── File hashes ──────────────────────────────────────────────────
+    # ── File hashes / file_state ─────────────────────────────────────
 
     def get_file_hashes(self) -> dict[str, str]:
-        """Get all stored file hashes."""
-        rows = self._conn.execute("SELECT file_path, hash FROM file_hashes").fetchall()
-        return {row["file_path"]: row["hash"] for row in rows}
+        """Get all stored file hashes (legacy alias)."""
+        rows = self._conn.execute("SELECT path, hash FROM file_state").fetchall()
+        return {row["path"]: row["hash"] for row in rows}
+
+    def get_file_state(self) -> dict[str, dict[str, Any]]:
+        """Get all file state entries with timestamps."""
+        rows = self._conn.execute("SELECT path, hash, indexed_at_unix FROM file_state").fetchall()
+        return {
+            row["path"]: {
+                "hash": row["hash"],
+                "indexed_at": row["indexed_at_unix"],
+            }
+            for row in rows
+        }
 
     def set_file_hash(self, path: str, hash_val: str) -> None:
         """Store a file hash for incremental update detection."""
+        now_unix = int(_now_unix())
         self._conn.execute(
-            "INSERT OR REPLACE INTO file_hashes (file_path, hash) VALUES (?, ?)",
-            (path, hash_val),
+            "INSERT OR REPLACE INTO file_state (path, hash, indexed_at_unix) VALUES (?, ?, ?)",
+            (path, hash_val, now_unix),
+        )
+
+    def set_file_hashes(self, hashes: dict[str, str]) -> None:
+        """Bulk store file hashes."""
+        now_unix = int(_now_unix())
+        self._conn.execute("DELETE FROM file_state")
+        self._conn.executemany(
+            "INSERT OR REPLACE INTO file_state (path, hash, indexed_at_unix) VALUES (?, ?, ?)",
+            [(p, h, now_unix) for p, h in hashes.items()],
         )
 
     def get_changed_files(self, current_hashes: dict[str, str]) -> tuple[list[str], list[str]]:
@@ -390,23 +520,49 @@ class GraphStore:
     # ── Durable embeddings ──────────────────────────────────────────
 
     def save_embeddings(self, model: str, vectors: dict[str, list[float]]) -> None:
+        """Save embeddings keyed by qualified name.
+
+        The vectors are stored as BLOBs (struct-packed floats).
+        """
         if not model.strip():
             raise ValueError("embedding model must not be empty")
+        from ..persistence.embeddings.local import encode_embedding
+
         with self._conn:
             self._conn.execute("DELETE FROM embeddings WHERE model = ?", (model,))
             self._conn.executemany(
-                "INSERT INTO embeddings(qualified_name, model, vector, updated_at) VALUES (?, ?, ?, ?)",
+                "INSERT INTO embeddings(node_id, model, vector) VALUES (?, ?, ?)",
                 [
-                    (qname, model, json.dumps(vector), _now_iso())
+                    (self._resolve_qname(qname), model, encode_embedding(vector))
                     for qname, vector in vectors.items()
+                    if self._resolve_qname(qname) is not None
                 ],
             )
 
     def load_embeddings(self, model: str) -> dict[str, list[float]]:
+        """Load embeddings for a given model, keyed by qualified name."""
+        from ..persistence.embeddings.local import decode_embedding
+
         rows = self._conn.execute(
-            "SELECT qualified_name, vector FROM embeddings WHERE model = ?", (model,)
+            "SELECT node_id, vector FROM embeddings WHERE model = ?", (model,)
         ).fetchall()
-        return {row["qualified_name"]: json.loads(row["vector"]) for row in rows}
+
+        # Map node_id back to qualified_name
+        node_map: dict[int, str] = {}
+        for node_id, qname in self._conn.execute(
+            "SELECT node_id, qualified_name FROM nodes"
+        ).fetchall():
+            node_map[node_id] = qname
+
+        result: dict[str, list[float]] = {}
+        for row in rows:
+            nid = row["node_id"]
+            qname = node_map.get(nid)
+            if qname is not None:
+                vec = decode_embedding(row["vector"])
+                if vec is not None:
+                    result[qname] = vec
+        return result
 
     def clear_embeddings(self, model: str | None = None) -> None:
         with self._conn:
@@ -414,6 +570,15 @@ class GraphStore:
                 self._conn.execute("DELETE FROM embeddings")
             else:
                 self._conn.execute("DELETE FROM embeddings WHERE model = ?", (model,))
+
+    def get_embedding_stats(self) -> tuple[int, str | None] | None:
+        """Return (count, model) or None if no embeddings."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) as cnt, model FROM embeddings LIMIT 1"
+        ).fetchone()
+        if row is None or row["cnt"] == 0:
+            return None
+        return (row["cnt"], row["model"])
 
     # ── Status ───────────────────────────────────────────────────────
 
@@ -458,11 +623,31 @@ class GraphStore:
     def __exit__(self, *args: Any) -> None:
         self.close()
 
+    def _resolve_qname(self, qname: str) -> int | None:
+        """Resolve a qualified name to a node_id."""
+        row = self._conn.execute(
+            "SELECT node_id FROM nodes WHERE qualified_name = ?", (qname,)
+        ).fetchone()
+        return row["node_id"] if row else None
+
 
 def _now_iso() -> str:
     """Get current time as ISO string."""
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat()
+
+
+def _now_unix() -> int:
+    """Get current time as Unix timestamp."""
+    from datetime import datetime, timezone
+    return int(datetime.now(timezone.utc).timestamp())
+
+
+def _confidence_class_name(confidence: Confidence) -> str:
+    """Get the confidence class string for an Edge."""
+    if hasattr(confidence, 'value'):
+        return confidence.value
+    return str(confidence)
 
 
 def _graph_to_payload(graph: Graph) -> dict[str, Any]:

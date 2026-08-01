@@ -7,7 +7,7 @@ from typing import Any
 from ...core.edge import EdgeKind
 from ...core.id import NodeId
 from ...core.node import NodeKind
-from .builtin import _builtin_patterns
+from .builtin import built_in_patterns
 from .types import FrameworkPattern, PatternMatch
 
 
@@ -20,7 +20,7 @@ def detect_patterns(
     Returns a list of PatternMatch objects for patterns that matched.
     """
     if patterns is None:
-        patterns = _builtin_patterns()
+        patterns = built_in_patterns()
 
     matches: list[PatternMatch] = []
     for pattern in patterns:

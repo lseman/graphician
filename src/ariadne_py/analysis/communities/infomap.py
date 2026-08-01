@@ -15,6 +15,8 @@ import math
 from collections import defaultdict
 from typing import Any
 
+import numpy as np
+
 from ...core.edge import EdgeKind
 from ...core.graph import Graph
 from ...core.id import NodeId
@@ -27,6 +29,7 @@ from .core import (
     identity_labels,
     relabel,
 )
+from .numba_accel import _random_walk_init_csr, build_csr_from_working, has_numba
 from .utils import _find_community, _to_networkx
 
 
@@ -233,10 +236,23 @@ def _random_walk_init(working: WorkingGraph) -> list[int]:
 
     Runs random walks and assigns each node the label of its
     most-visited neighbor.
+    Uses numba-accelerated CSR loops when available.
     """
     n = working.len()
     walk_steps = max(n, 10) * 5
     walk_count = max(n, 10)
+
+    if has_numba():
+        row_ptr, col_idx, edge_weight = build_csr_from_working(working)
+        degree = np.array(working.degree, dtype=np.float64)
+        self_loop = np.array(working.self_loop, dtype=np.float64)
+        labels = _random_walk_init_csr(
+            n, row_ptr, col_idx, edge_weight, degree, self_loop,
+            walk_steps, walk_count, 42,
+        )
+        return labels.tolist()
+
+    # Pure Python fallback
     rng = LcgRng()
 
     # Compute degree for random walk selection

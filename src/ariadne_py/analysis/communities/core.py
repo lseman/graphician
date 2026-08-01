@@ -105,14 +105,15 @@ class WorkingGraph:
         adj_map: dict[int, dict[int, float]] = defaultdict(dict)
         self_loop: list[float] = [0.0] * n
 
+        # O(1) node→index lookup (avoids O(n²) list.index calls)
+        node_to_index: dict[NodeId, int] = {nid: i for i, nid in enumerate(nodes)}
+
         for _, src, dst, edge in graph.edges():
-            try:
-                src_idx = nodes.index(src)
-            except ValueError:
+            src_idx = node_to_index.get(src)
+            if src_idx is None:
                 continue
-            try:
-                dst_idx = nodes.index(dst)
-            except ValueError:
+            dst_idx = node_to_index.get(dst)
+            if dst_idx is None:
                 continue
 
             weight: float

@@ -15,6 +15,8 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from typing import Any
 
+import numpy as np
+
 from ...core.edge import EdgeKind
 from ...core.graph import Graph
 from ...core.id import NodeId
@@ -27,6 +29,7 @@ from .core import (
     identity_labels,
     relabel,
 )
+from .numba_accel import _local_move_csr, build_csr_from_working, has_numba
 from .utils import _find_community, _to_networkx
 
 
@@ -111,12 +114,28 @@ def _local_move(working: WorkingGraph, options: CommunityOptions) -> list[int]:
     modularity gain calculation — the difference is in the refinement
     phase and connectivity enforcement.
 
+    Uses numba-accelerated CSR loops when available.
+
     Mirrors Rust ``local_move`` (leiden.rs:57-120).
     """
+    if has_numba():
+        row_ptr, col_idx, edge_weight = build_csr_from_working(working)
+        degree = np.array(working.degree, dtype=np.float64)
+        result = _local_move_csr(
+            np.intp(working.len()),
+            row_ptr, col_idx, edge_weight, degree,
+            options.resolution,
+            options.max_passes,
+            options.min_modularity_gain,
+            42,
+        )
+        return result.tolist()
+
+    # Pure Python fallback
     n = working.len()
     comm: list[int] = list(range(n))
     comm_degree: list[float] = list(working.degree)
-    comm_size: list[float] = [len(m) for m in working.members]
+    comm_size: list[float] = [float(len(m)) for m in working.members]
     two_m = 2.0 * working.total_weight
 
     if two_m <= 0.0:

@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
+import numpy as np
+
 from ...core.edge import EdgeKind
 from ...core.graph import Graph
 from ...core.id import NodeId
@@ -23,6 +25,7 @@ from .core import (
     identity_labels,
     relabel,
 )
+from .numba_accel import _local_move_csr, build_csr_from_working, has_numba
 from .utils import _find_community, _to_networkx, _modularity, _find_cross_community_edges
 
 
@@ -102,12 +105,28 @@ def _local_move(working: WorkingGraph, options: CommunityOptions) -> list[int]:
 
     Mirrors Rust ``local_move`` (louvain.rs:56-120).
 
-    Uses incremental tracking of comm_degree and comm_size for O(E) per pass.
+    Uses numba-accelerated CSR loops when available, falling back to
+    pure Python for correctness verification.
     """
+    # Try numba-accelerated version first
+    if has_numba():
+        row_ptr, col_idx, edge_weight = build_csr_from_working(working)
+        degree = np.array(working.degree, dtype=np.float64)
+        result = _local_move_csr(
+            np.intp(working.len()),
+            row_ptr, col_idx, edge_weight, degree,
+            options.resolution,
+            options.max_passes,
+            options.min_modularity_gain,
+            42,
+        )
+        return result.tolist()
+
+    # Pure Python fallback
     n = working.len()
     comm: list[int] = list(range(n))
     comm_degree: list[float] = list(working.degree)
-    comm_size: list[float] = [len(m) for m in working.members]
+    comm_size: list[float] = [float(len(m)) for m in working.members]
     two_m = 2.0 * working.total_weight
 
     if two_m <= 0.0:
@@ -123,36 +142,30 @@ def _local_move(working: WorkingGraph, options: CommunityOptions) -> list[int]:
 
             node_mass = float(len(working.members[u]))
 
-            # Remove u from its current community for gain calculation
             comm_degree[current] -= node_degree
             comm_size[current] -= node_mass
 
-            # Compute weight from u to each neighboring community
             weight_to_comm: dict[int, float] = defaultdict(float)
             for v, w in working.adj[u]:
                 weight_to_comm[comm[v]] += w
 
-            # Find best community to move u to
             best = current
             best_gain = options.min_modularity_gain
 
-            # Stay gain
             stay_weight = weight_to_comm.get(current, 0.0)
             stay_gain = stay_weight - options.resolution * node_degree * comm_degree[current] / two_m
             if stay_gain > best_gain:
                 best_gain = stay_gain
                 best = current
 
-            # Try each candidate
-            for candidate, edge_weight in weight_to_comm.items():
+            for candidate, ew in weight_to_comm.items():
                 if candidate == current:
                     continue
-                gain = edge_weight - options.resolution * node_degree * comm_degree[candidate] / two_m
+                gain = ew - options.resolution * node_degree * comm_degree[candidate] / two_m
                 if gain > best_gain:
                     best_gain = gain
                     best = candidate
 
-            # Update
             comm[u] = best
             comm_degree[best] += node_degree
             comm_size[best] += node_mass

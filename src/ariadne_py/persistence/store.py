@@ -21,6 +21,12 @@ from ..core.edge import Edge, EdgeKind, Confidence
 from ..core.graph import Graph
 from ..core.id import EdgeId, NodeId
 from ..core.node import Node, NodeKind
+from .embeddings.local import (
+    cosine_similarity,
+    encode_embedding,
+    embedding_source_text,
+    semantic_embedding,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -407,7 +413,7 @@ class GraphStore:
 
     def _edge_row_to_edge(self, row: sqlite3.Row) -> Edge:
         """Convert a database row to an Edge."""
-        conf_class = row.get("conf_class", "extracted")
+        conf_class = row["conf_class"] if row["conf_class"] else "extracted"
         confidence = parse_confidence(conf_class, row["confidence"])
         return Edge(
             kind=EdgeKind(row["kind"]),
@@ -612,6 +618,533 @@ class GraphStore:
                 "SELECT node_id, kind, name, qualified_name, source_text FROM nodes"
             )
         return int(self._conn.execute("SELECT COUNT(*) FROM nodes_fts").fetchone()[0])
+
+    # ── FTS5 search / stats ────────────────────────────────────────
+
+    def fts_stats(self) -> int:
+        """Return the number of rows in the FTS5 index."""
+        row = self._conn.execute("SELECT COUNT(*) as cnt FROM nodes_fts").fetchone()
+        return row["cnt"] if row else 0
+
+    def fts_search(self, query: str, limit: int = 20) -> list[tuple[str, float]]:
+        """Full-text search via the FTS5 ``nodes_fts`` virtual table.
+
+        Returns ``(qualified_name, bm25_score)`` pairs ordered by relevance
+        (bm25 is negative; we negate so higher = better).
+        Returns an empty list if the FTS table is not yet populated or the
+        query contains no indexable tokens.
+
+        Mirrors the Rust ``fts_search`` from ``persistence/database/mod.rs``.
+        """
+        if not query or not query.strip() or limit <= 0:
+            return []
+
+        from .fts import build_fts5_query
+
+        safe_query = build_fts5_query(query)
+        if not safe_query:
+            return []
+
+        try:
+            sql = (
+                "SELECT n.qualified_name, bm25(nodes_fts) "
+                "FROM nodes_fts "
+                "JOIN nodes n ON nodes_fts.node_id = n.node_id "
+                "WHERE nodes_fts MATCH ? "
+                "ORDER BY bm25(nodes_fts) "
+                "LIMIT ?"
+            )
+            rows = self._conn.execute(sql, (safe_query, limit)).fetchall()
+        except Exception:
+            return []
+
+        results: list[tuple[str, float]] = []
+        for qname, score in rows:
+            results.append((qname, score))
+        return results
+
+    # ── Temporal / versioned queries ───────────────────────────────
+
+    def temporal_nodes(self) -> list[Node]:
+        """Union of active nodes and archived (closed-out) rows.
+
+        Mirrors the Rust ``temporal_nodes``.
+        """
+        out: list[Node] = []
+        seen_qnames: set[str] = set()
+        rows = self._conn.execute(
+            "SELECT name, kind, qualified_name, source_uri, line_start, line_end, "
+            "properties, valid_from, valid_to, source_text "
+            "FROM nodes "
+            "UNION ALL "
+            "SELECT name, kind, qualified_name, source_uri, line_start, line_end, "
+            "properties, valid_from, valid_to, source_text "
+            "FROM node_versions"
+        ).fetchall()
+        # Sort so archived rows (valid_to is not None) come before active rows.
+        # This way active rows overwrite archived ones (same qname).
+        rows.sort(key=lambda r: r["valid_to"] is not None)
+        for row in rows:
+            qname = row["qualified_name"]
+            if qname not in seen_qnames:
+                seen_qnames.add(qname)
+                out.append(self._row_to_node(row))
+        return out
+
+    def temporal_edges(self) -> list[tuple[str, str, Edge, str | None]]:
+        """Union of active edges and archived rows (via JOIN + UNION).
+
+        Returns list of ``(src_qname, dst_qname, Edge, source_uri | None)``.
+        Mirrors the Rust ``temporal_edges``.
+        """
+        out: list[tuple[str, str, Edge, str | None]] = []
+        seen: set[tuple[str, str, EdgeKind]] = set()
+
+        rows = self._conn.execute(
+            "SELECT s.qualified_name, d.qualified_name, e.kind, e.confidence, "
+            "e.conf_class, e.properties, e.valid_from, e.valid_to, "
+            "COALESCE(s.source_uri, d.source_uri) "
+            "FROM edges e "
+            "JOIN nodes s ON e.source_id = s.node_id "
+            "JOIN nodes d ON e.target_id = d.node_id "
+            "UNION ALL "
+            "SELECT src_qname, dst_qname, kind, confidence, conf_class, "
+            "properties, valid_from, valid_to, source_uri "
+            "FROM edge_versions"
+        ).fetchall()
+        for row in rows:
+            src_qn = row[0]
+            dst_qn = row[1]
+            kind_str = row[2]
+            conf_score = row[3]
+            conf_class = row[4]
+            props_str = row[5]
+            valid_from = row[6]
+            valid_to = row[7]
+            source_uri = row[8]
+
+            try:
+                kind = EdgeKind(kind_str)
+            except ValueError:
+                continue
+            confidence = parse_confidence(conf_class, conf_score)
+            edge = Edge(
+                kind=kind,
+                confidence=confidence,
+                properties=json.loads(props_str) if props_str else {},
+                valid_from=valid_from,
+                valid_to=valid_to,
+            )
+            identity = (src_qn, dst_qn, kind)
+            if identity not in seen:
+                seen.add(identity)
+                out.append((src_qn, dst_qn, edge, source_uri))
+        return out
+
+    def load_temporal(self) -> Graph:
+        """Load a graph including archived (closed-out) rows from the version
+        tables, so temporal diffs can see nodes/edges that are no longer
+        active.
+
+        Archived rows are inserted first and active rows last, so for a
+        qualified name present in both the active state wins.
+
+        Mirrors the Rust ``load_temporal``.
+        """
+        graph = Graph()
+
+        # Load nodes: sorted so archived rows (valid_to set) come before
+        # active rows — active rows overwrite.
+        nodes = self.temporal_nodes()
+        # Sort: archived (valid_to is not None) first, then active
+        nodes.sort(key=lambda n: n.valid_to is not None)
+        for node in nodes:
+            graph.add_node(node)
+
+        # Load edges: sorted so archived rows come first
+        edges = self.temporal_edges()
+        edges.sort(key=lambda e: e[2].valid_to is not None)
+        for src_qn, dst_qn, edge, _ in edges:
+            src = graph.find_by_qname(src_qn)
+            dst = graph.find_by_qname(dst_qn)
+            if src is not None and dst is not None:
+                graph.add_edge(src, dst, edge)
+
+        return graph
+
+    def archive_nodes(self, nodes: list[Node], valid_to: str) -> None:
+        """Archive nodes to the version table with a ``valid_to`` timestamp.
+
+        Mirrors the Rust ``archive_nodes``.
+        """
+        if not nodes:
+            return
+        with self._conn:
+            for node in nodes:
+                props = json.dumps(node.properties)
+                vf = node.valid_from or valid_to
+                self._conn.execute(
+                    "INSERT INTO node_versions "
+                    "(kind, name, qualified_name, source_uri, line_start, "
+                    "line_end, properties, valid_from, valid_to) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        node.kind.value,
+                        node.name,
+                        node.qualified_name,
+                        node.source_uri,
+                        node.line_start,
+                        node.line_end,
+                        props,
+                        vf,
+                        valid_to,
+                    ),
+                )
+
+    def archive_edges(
+        self,
+        edges: list[tuple[str, str, Edge, str | None]],
+        valid_to: str,
+    ) -> None:
+        """Archive edges to the version table with a ``valid_to`` timestamp.
+
+        Args:
+            edges: List of ``(src_qname, dst_qname, Edge, source_uri)``.
+            valid_to: Timestamp to set on archived rows.
+
+        Mirrors the Rust ``archive_edges``.
+        """
+        if not edges:
+            return
+        with self._conn:
+            for src_qn, dst_qn, edge, source_uri in edges:
+                props = json.dumps(edge.properties)
+                vf = edge.valid_from or valid_to
+                conf_class = edge.confidence.class_name() if hasattr(
+                    edge.confidence, 'class_name'
+                ) else _confidence_class_name(edge.confidence)
+                conf_score = edge.confidence.score() if hasattr(
+                    edge.confidence, 'score'
+                ) else 1.0
+                self._conn.execute(
+                    "INSERT INTO edge_versions "
+                    "(src_qname, dst_qname, kind, confidence, conf_class, "
+                    "properties, source_uri, valid_from, valid_to) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        src_qn,
+                        dst_qn,
+                        edge.kind.value,
+                        conf_score,
+                        conf_class,
+                        props,
+                        source_uri,
+                        vf,
+                        valid_to,
+                    ),
+                )
+
+    # ── Source-filtered reads ──────────────────────────────────────
+
+    def active_nodes_for_sources(self, sources: list[str]) -> list[Node]:
+        """Read active nodes whose ``source_uri`` matches any of the given sources.
+
+        Returns unique nodes by qualified name (first occurrence wins).
+        Mirrors the Rust ``active_nodes_for_sources``.
+        """
+        out: list[Node] = []
+        seen: set[str] = set()
+        sql = (
+            "SELECT name, kind, qualified_name, source_uri, line_start, line_end, "
+            "properties, valid_from, valid_to, source_text "
+            "FROM nodes WHERE source_uri = ?"
+        )
+        for source in sources:
+            rows = self._conn.execute(sql, (source,)).fetchall()
+            for row in rows:
+                node = self._row_to_node(row)
+                if node.qualified_name not in seen:
+                    seen.add(node.qualified_name)
+                    out.append(node)
+        return out
+
+    def active_edges_for_sources(self, sources: list[str]) -> list[tuple[str, str, Edge, str | None]]:
+        """Read active edges where at least one endpoint matches a given source.
+
+        Returns unique edges by ``(src_qname, dst_qname, kind)``.
+        Mirrors the Rust ``active_edges_for_sources``.
+        """
+        out: list[tuple[str, str, Edge, str | None]] = []
+        seen: set[tuple[str, str, EdgeKind]] = set()
+        sql = (
+            "SELECT s.qualified_name, d.qualified_name, e.kind, e.confidence, "
+            "e.conf_class, e.properties, e.valid_from, e.valid_to, "
+            "COALESCE(s.source_uri, d.source_uri) "
+            "FROM edges e "
+            "JOIN nodes s ON e.source_id = s.node_id "
+            "JOIN nodes d ON e.target_id = d.node_id "
+            "WHERE s.source_uri = ? OR d.source_uri = ?"
+        )
+        for source in sources:
+            rows = self._conn.execute(sql, (source, source)).fetchall()
+            for row in rows:
+                src_qn = row[0]
+                dst_qn = row[1]
+                try:
+                    kind = EdgeKind(row[2])
+                except ValueError:
+                    continue
+                confidence = parse_confidence(row[4], row[3])
+                edge = Edge(
+                    kind=kind,
+                    confidence=confidence,
+                    properties=json.loads(row[5]) if row[5] else {},
+                    valid_from=row[6],
+                    valid_to=row[7],
+                )
+                source_uri = row[8]
+                identity = (src_qn, dst_qn, kind)
+                if identity not in seen:
+                    seen.add(identity)
+                    out.append((src_qn, dst_qn, edge, source_uri))
+        return out
+
+    # ── Source deletion ────────────────────────────────────────────
+
+    def delete_sources(self, sources: list[str]) -> None:
+        """Delete all nodes, edges, FTS, embeddings, and file_state for
+        the given source URIs.
+
+        Mirrors the Rust ``delete_sources``.
+        """
+        with self._conn:
+            for source in sources:
+                self._conn.execute(
+                    "DELETE FROM edges "
+                    "WHERE source_id IN (SELECT node_id FROM nodes WHERE source_uri = ?) "
+                    "   OR target_id IN (SELECT node_id FROM nodes WHERE source_uri = ?)",
+                    (source, source),
+                )
+                self._conn.execute(
+                    "DELETE FROM nodes_fts WHERE node_id IN "
+                    "(SELECT node_id FROM nodes WHERE source_uri = ?)",
+                    (source,),
+                )
+                self._conn.execute(
+                    "DELETE FROM embeddings WHERE node_id IN "
+                    "(SELECT node_id FROM nodes WHERE source_uri = ?)",
+                    (source,),
+                )
+                self._conn.execute(
+                    "DELETE FROM nodes WHERE source_uri = ?",
+                    (source,),
+                )
+                self._conn.execute(
+                    "DELETE FROM file_state WHERE path = ?",
+                    (source,),
+                )
+
+    # ── Semantic search ────────────────────────────────────────────
+
+    def semantic_search(
+        self,
+        query: str,
+        limit: int = 20,
+    ) -> list[tuple[str, float]]:
+        """Semantic search over stored embeddings.
+
+        Returns ``(qualified_name, cosine_score)`` pairs ordered descending.
+        Mirrors the Rust ``semantic_search``.
+        """
+        if not query or not query.strip() or limit <= 0:
+            return []
+
+        from ..persistence.embeddings.local import (
+            decode_embedding,
+            semantic_embedding,
+        )
+
+        stats = self.get_embedding_stats()
+        if stats is None or stats[0] == 0:
+            return []
+
+        count, model = stats
+        model = model or DEFAULT_EMBEDDING_MODEL
+
+        # Build query embedding using the same model
+        query_vector = semantic_embedding(query)
+
+        # Query embeddings
+        rows = self._conn.execute(
+            "SELECT n.qualified_name, e.vector "
+            "FROM embeddings e "
+            "JOIN nodes n ON e.node_id = n.node_id "
+            "WHERE n.qualified_name NOT LIKE 'call::%'"
+        ).fetchall()
+
+        results: list[tuple[str, float]] = []
+        for qname, blob in rows:
+            vector = decode_embedding(blob)
+            if vector is None:
+                continue
+            score = cosine_similarity(query_vector, vector)
+            if score >= 0.20:
+                results.append((qname, score))
+
+        results.sort(key=lambda x: x[1], reverse=True)
+        return results[:limit]
+
+    # ── Embedding rebuild ──────────────────────────────────────────
+
+    def rebuild_embeddings(self) -> int:
+        """Rebuild all embeddings from node data using the local model.
+
+        Deletes existing embeddings, then regenerates them for every
+        non-placeholder node. Returns the number of embeddings stored.
+
+        Mirrors the Rust ``rebuild_embeddings``.
+        """
+        from ..persistence.embeddings.local import (
+            decode_embedding,
+            embedding_source_text,
+            semantic_embedding,
+            encode_embedding,
+        )
+
+        nodes_data = self._fetch_embeddable_nodes()
+
+        with self._conn:
+            self._conn.execute("DELETE FROM embeddings")
+            self._conn.executemany(
+                "INSERT INTO embeddings (node_id, model, vector) VALUES (?, ?, ?)",
+                [
+                    (
+                        row["node_id"],
+                        DEFAULT_EMBEDDING_MODEL,
+                        encode_embedding(
+                            semantic_embedding(
+                                embedding_source_text(
+                                    row["kind"],
+                                    row["name"],
+                                    row["qualified_name"],
+                                    row["source_uri"],
+                                    row["source_text"],
+                                )
+                            )
+                        ),
+                    )
+                    for row in nodes_data
+                ],
+            )
+
+        stats = self.get_embedding_stats()
+        return stats[0] if stats else 0
+
+    def rebuild_external_embeddings(
+        self,
+        config: dict[str, Any] | None = None,
+    ) -> int:
+        """Rebuild embeddings using an external provider (OpenAI / Google / Ollama).
+
+        Args:
+            config: Dict with keys ``provider`` (one of ``openai-embedding``,
+                ``google-embedding``, ``ollama-embedding``) and optionally
+                ``api_key`` and ``dimension``. If ``None`` falls back to the
+                ``build_external_embeddings`` helper from the embeddings module.
+
+        Returns the number of embeddings stored.
+
+        Mirrors the Rust ``rebuild_external_embeddings``.
+        """
+        from ..persistence.embeddings import (
+            ExternalEmbeddingConfig,
+            external_embedding_from_config,
+        )
+
+        if config is None:
+            config = {}
+
+        ext_config = ExternalEmbeddingConfig(**config)
+        model_name = ext_config.model or (
+            {
+                "openai-embedding": "text-embedding-3-small",
+                "google-embedding": "text-embedding-004",
+                "ollama-embedding": "nomic-embed-text",
+            }.get(ext_config.provider, "unknown")
+        )
+        storage_model = f"{ext_config.provider}:{model_name}"
+
+        # Build vectors before opening the write transaction.
+        nodes_data = self._fetch_embeddable_nodes()
+        vectors: dict[str, list[float]] = {}
+        for row in nodes_data:
+            text = embedding_source_text(
+                row["kind"],
+                row["name"],
+                row["qualified_name"],
+                row["source_uri"],
+                row["source_text"],
+            )
+            try:
+                vec = external_embedding_from_config(ext_config, text)
+            except Exception as e:
+                logger.warning("failed to embed %s: %s", row["qualified_name"], e)
+                continue
+            if len(vec) != ext_config.dimension:
+                logger.warning(
+                    "dimension mismatch for %s: expected %d, got %d",
+                    row["qualified_name"],
+                    ext_config.dimension,
+                    len(vec),
+                )
+                continue
+            vectors[row["qualified_name"]] = vec
+
+        # Store in a single transaction.
+        with self._conn:
+            self._conn.execute("DELETE FROM embeddings")
+            self.save_embeddings(storage_model, vectors)
+
+        stats = self.get_embedding_stats()
+        return stats[0] if stats else 0
+
+    def _fetch_embeddable_nodes(self) -> list[sqlite3.Row]:
+        """Fetch node data for embedding generation.
+
+        Returns rows with columns: node_id, kind, name, qualified_name,
+        source_uri, source_text. Mirrors the Rust ``fetch_embeddable_nodes``.
+        """
+        return self._conn.execute(
+            "SELECT node_id, kind, name, qualified_name, source_uri, source_text "
+            "FROM nodes WHERE qualified_name NOT LIKE 'call::%'"
+        ).fetchall()
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        """Raw SQLite connection for temporal and differential queries.
+
+        Mirrors the Rust ``conn`` accessor.
+        """
+        return self._conn
+
+    @classmethod
+    def open_in_memory(cls) -> GraphStore:
+        """Open an in-memory SQLite database for testing.
+
+        Mirrors the Rust ``open_in_memory``.
+        """
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        store = GraphStore.__new__(GraphStore)
+        store._conn = conn
+        store.db_path = Path(":memory:")
+        store._init_schema()
+        store._migrate_v1()
+        return store
 
     def close(self) -> None:
         """Close the database connection."""

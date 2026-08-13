@@ -197,7 +197,7 @@ def is_code_like(text: str) -> bool:
                    'let', 'const', 'var', 'if', 'for', 'while', 'return',
                    'import', 'from', 'use', 'pub', 'private', 'public',
                    'async', 'await', 'try', 'catch', 'throw', 'raise']
-    return any(text.contains(kw) for kw in has_keyword) or \
+    return any(kw in text for kw in has_keyword) or \
            any(op in text for op in has_op) or has_delim
 
 

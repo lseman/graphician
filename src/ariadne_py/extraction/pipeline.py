@@ -83,8 +83,9 @@ class ExtractionPipeline:
     and relationships, and populates a Graph.
     """
 
-    def __init__(self, registry: LanguageRegistry) -> None:
+    def __init__(self, registry: LanguageRegistry, *, strict: bool = False) -> None:
         self.registry = registry
+        self.strict = strict
         self.graph = Graph()
         self._file_hashes: dict[str, str] = {}  # path → sha256
 
@@ -232,7 +233,9 @@ class ExtractionPipeline:
         rel_path = file_path.relative_to(root)
         try:
             raw = file_path.read_bytes()
-        except OSError:
+        except (OSError, UnicodeError):
+            if self.strict:
+                raise
             return
         self._file_hashes[rel_path.as_posix()] = hashlib.sha256(raw).hexdigest()
 
@@ -249,6 +252,8 @@ class ExtractionPipeline:
                 else:
                     extract_svg(file_path, self.graph)
             except (ImportError, OSError, UnicodeError) as exc:
+                if self.strict:
+                    raise
                 logger.warning("Could not extract document %s: %s", file_path, exc)
             return
 
@@ -257,8 +262,12 @@ class ExtractionPipeline:
             return
 
         try:
-            source = file_path.read_text(encoding="utf-8", errors="replace")
+            source = file_path.read_text(
+                encoding="utf-8", errors="strict" if self.strict else "replace"
+            )
         except OSError:
+            if self.strict:
+                raise
             return
 
         # Compute hash for incremental updates

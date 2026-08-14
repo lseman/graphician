@@ -6,9 +6,9 @@ Maps file extensions to tree-sitter parsers and extraction configs.
 from __future__ import annotations
 
 import enum
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 
 class Language(enum.StrEnum):
@@ -46,11 +46,12 @@ class LanguageRegistry:
 
     def _register_builtins(self) -> None:
         """Register all built-in language specs."""
-        import tree_sitter_python as tspython
-        import tree_sitter_typescript as tstypescript
-        import tree_sitter_rust as tsrust
         import tree_sitter_cpp as tscpp
         import tree_sitter_java as tsjava
+        import tree_sitter_javascript as tsjavascript
+        import tree_sitter_python as tspython
+        import tree_sitter_rust as tsrust
+        import tree_sitter_typescript as tstypescript
 
         specs = [
             LanguageSpec(
@@ -67,7 +68,7 @@ class LanguageRegistry:
             LanguageSpec(
                 name=Language.TYPESCRIPT,
                 extensions=[".ts", ".tsx"],
-                parser_factory=lambda: self._make_parser(tstypescript.language_ts()),
+                parser_factory=lambda: self._make_parser(tstypescript.language_typescript()),
                 extract_file=True,
                 extract_functions=True,
                 extract_classes=True,
@@ -78,7 +79,7 @@ class LanguageRegistry:
             LanguageSpec(
                 name=Language.JAVASCRIPT,
                 extensions=[".js", ".mjs", ".cjs"],
-                parser_factory=lambda: self._make_parser(tstypescript.language_js()),
+                parser_factory=lambda: self._make_parser(tsjavascript.language()),
                 extract_file=True,
                 extract_functions=True,
                 extract_classes=True,
@@ -133,7 +134,11 @@ class LanguageRegistry:
         from tree_sitter import Language as TreeSitterLanguage
         from tree_sitter import Parser
 
-        language = lang_ptr if isinstance(lang_ptr, TreeSitterLanguage) else TreeSitterLanguage(lang_ptr)
+        language = (
+            lang_ptr
+            if isinstance(lang_ptr, TreeSitterLanguage)
+            else TreeSitterLanguage(lang_ptr)
+        )
         try:
             return Parser(language)
         except TypeError:  # tree-sitter < 0.25

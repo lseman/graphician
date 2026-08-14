@@ -1,8 +1,5 @@
 """Tests for the 6-tier call-placeholder resolver."""
 
-from pathlib import Path
-from tempfile import TemporaryDirectory
-
 import pytest
 
 from ariadne_py.core.edge import Edge, EdgeKind
@@ -119,13 +116,64 @@ class TestTier3Scoped:
         edge.properties["call_scope"] = "beta"
         g.add_edge(caller, ph, edge)
 
-        alpha = _make_fn(g, "src/lib.rs::alpha::shared", "src/lib.rs")
+        _make_fn(g, "src/lib.rs::alpha::shared", "src/lib.rs")
         beta = _make_fn(g, "src/lib.rs::beta::shared", "src/lib.rs")
 
         resolved = resolve_call_placeholders(g)
         assert resolved == 1
         points = list(g.out_neighbors(caller))
         assert any(dst == beta for dst, _ in points)
+
+
+class TestTier4Receiver:
+    @pytest.mark.parametrize(
+        ("annotation", "expected_type"),
+        [
+            ("graph: &mut dyn GraphMut", "GraphMut"),
+            ("store: &crate::persistence::Store", "Store"),
+        ],
+    )
+    def test_parameter_annotation_resolves_receiver(self, annotation, expected_type):
+        g = Graph()
+        receiver = annotation.split(":", 1)[0]
+        caller_node = Node.new(NodeKind.FUNCTION, "file::src/main.rs::run")
+        caller_node.with_source("src/main.rs", 0, 1)
+        caller_node.with_source_text(
+            f"fn run({annotation}) {{ {receiver}.persist(); }}"
+        )
+        caller = g.add_node(caller_node)
+        ph = _make_fn(g, "call::persist")
+        edge = Edge.ambiguous(EdgeKind.CALLS)
+        edge.properties["call_receiver"] = receiver
+        g.add_edge(caller, ph, edge)
+        expected = _make_method(g, f"file::src/types.rs::{expected_type}::persist")
+        _make_method(g, "file::src/types.rs::Other::persist")
+
+        assert resolve_call_placeholders(g) == 1
+
+        assert any(dst == expected for dst, edge in g.out_neighbors(caller))
+
+    def test_self_receiver_uses_surrounding_impl(self):
+        g = Graph()
+        source = """impl Store {
+    fn save(&self) {
+        self.persist();
+    }
+}
+"""
+        caller_node = Node.new(NodeKind.FUNCTION, "file::src/store.rs::save")
+        caller_node.with_source("src/store.rs", 2, 3).with_source_text(source)
+        caller = g.add_node(caller_node)
+        ph = _make_fn(g, "call::persist")
+        edge = Edge.ambiguous(EdgeKind.CALLS)
+        edge.properties["call_receiver"] = "self"
+        g.add_edge(caller, ph, edge)
+        expected = _make_method(g, "file::src/store.rs::Store::persist")
+        _make_method(g, "file::src/other.rs::Other::persist")
+
+        assert resolve_call_placeholders(g) == 1
+
+        assert any(dst == expected for dst, edge in g.out_neighbors(caller))
 
 
 class TestTier5ImportScoped:
@@ -144,7 +192,7 @@ class TestTier5ImportScoped:
 
         # Two candidates
         auth_login = _make_fn(g, "pkg/auth.py::login", "pkg/auth.py")
-        billing_login = _make_fn(g, "pkg/billing.py::login", "pkg/billing.py")
+        _make_fn(g, "pkg/billing.py::login", "pkg/billing.py")
 
         resolved = resolve_call_placeholders(g)
         assert resolved >= 1
@@ -224,7 +272,7 @@ class TestStaleRemoval:
         caller = _make_fn(g, "file::caller", "main.py")
         ph = _make_fn(g, "call::login")
         g.add_edge(caller, ph, Edge.ambiguous(EdgeKind.CALLS))
-        real = _make_fn(g, "pkg/auth.py::login", "pkg/auth.py")
+        _make_fn(g, "pkg/auth.py::login", "pkg/auth.py")
 
         resolve_call_placeholders(g)
 

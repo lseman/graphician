@@ -274,7 +274,6 @@ class AriadneMCP:
                 return hybrid_search(
                     graph,
                     params.get("query", ""),
-                    intent=params.get("intent"),
                     limit=params.get("limit", 20),
                 )
             case "impact":

@@ -29,14 +29,12 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
-from ..core.edge import Edge, EdgeKind, Confidence
+from ..core.edge import Confidence, Edge, EdgeKind
 from ..core.graph import Graph
 from ..core.id import EdgeId, NodeId
-from ..core.node import Node, NodeKind
+from ..core.node import NodeKind
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +127,7 @@ def should_suppress_call_placeholder(name: str) -> bool:
 
 def common_prefix_len(a: str, b: str) -> int:
     """Count of ``::`` segments shared between two qualified names."""
-    return sum(1 for x, y in zip(a.split("::"), b.split("::")) if x == y)
+    return sum(1 for x, y in zip(a.split("::"), b.split("::"), strict=False) if x == y)
 
 
 def module_stem(uri: str) -> str | None:
@@ -149,9 +147,11 @@ def _build_by_name(graph: Graph) -> dict[str, list[NodeId]]:
     """Map name → every non-placeholder function/method/class/type."""
     by_name: dict[str, list[NodeId]] = {}
     for nid, node in graph.nodes():
-        if node.kind in (NodeKind.FUNCTION, NodeKind.METHOD, NodeKind.CLASS, NodeKind.TYPE):
-            if not node.qualified_name.startswith("call::"):
-                by_name.setdefault(node.name, []).append(nid)
+        if (
+            node.kind in (NodeKind.FUNCTION, NodeKind.METHOD, NodeKind.CLASS, NodeKind.TYPE)
+            and not node.qualified_name.startswith("call::")
+        ):
+            by_name.setdefault(node.name, []).append(nid)
     return by_name
 
 
@@ -182,6 +182,7 @@ _RE_LET_STRUCT = re.compile(r"let\s+(?:mut\s+)?(\w+)\s*=\s*([A-Z]\w+)\s*\{")
 # Python-style: var = ClassName(...) or var = ClassName(...)
 _RE_PY_VAR_ANNOT = re.compile(r"(\w+)\s*:\s*([A-Z]\w+)\s*=")
 _RE_PY_VAR_ASSIGN = re.compile(r"(\w+)\s*=\s*([A-Z]\w+)\s*[\(\{]")
+_RE_IMPL_HEADER = re.compile(r"\bimpl(?:\s*<[^{}>]*>)?\s+([^{}]+?)\s*\{")
 
 _NAME_TYPE_MAP: dict[str, str] = {
     "graph": "Graph", "main_graph": "Graph", "app_graph": "Graph",
@@ -228,6 +229,68 @@ def _infer_type_from_let_bindings(source: str, var_name: str) -> str | None:
     for match in _RE_PY_VAR_ASSIGN.finditer(source):
         if match.group(1) == var_name:
             return match.group(2)
+    return None
+
+
+def _leading_type_name(type_expr: str) -> str | None:
+    """Return the main named type from a Rust-style type expression."""
+    rest = type_expr.lstrip()
+    while True:
+        rest = rest.lstrip("&").lstrip()
+        before = rest
+        for qualifier in ("mut", "dyn", "impl"):
+            tail = rest.removeprefix(qualifier)
+            if tail != rest and tail[:1].isspace():
+                rest = tail.lstrip()
+                break
+        if rest == before:
+            break
+
+    path_match = re.match(r"[A-Za-z_][\w]*(?:::[A-Za-z_][\w]*)*", rest)
+    if path_match is None:
+        return None
+    type_name = path_match.group(0).rsplit("::", 1)[-1]
+    return type_name if type_name[:1].isupper() else None
+
+
+def _infer_type_from_annotations(source: str, var_name: str) -> str | None:
+    """Infer a receiver type from a parameter or closure annotation."""
+    for match in re.finditer(rf"(?<!\w){re.escape(var_name)}(?!\w)\s*:\s*", source):
+        inferred = _leading_type_name(source[match.end():])
+        if inferred is not None:
+            return inferred
+    return None
+
+
+def _infer_impl_type_from_source(source: str, line_start: int | None) -> str | None:
+    """Infer the surrounding Rust ``impl`` type for a caller line."""
+    if line_start is None:
+        return None
+
+    for match in _RE_IMPL_HEADER.finditer(source):
+        header = match.group(1).strip()
+        target_expr = header.rsplit(" for ", 1)[-1]
+        impl_type = _leading_type_name(target_expr)
+        if impl_type is None:
+            continue
+
+        depth = 1
+        position = match.end()
+        while position < len(source) and depth:
+            if source[position] == "{":
+                depth += 1
+            elif source[position] == "}":
+                depth -= 1
+            position += 1
+        if depth:
+            continue
+
+        start_line = source.count("\n", 0, match.start())
+        end_line = source.count("\n", 0, position)
+        # Extractors differ on zero- versus one-based line locations, so
+        # accept either representation at this internal compatibility layer.
+        if start_line <= line_start <= end_line or start_line <= line_start - 1 <= end_line:
+            return impl_type
     return None
 
 
@@ -372,11 +435,18 @@ def resolve_call_placeholders(graph: Graph) -> int:
         if receiver_name is not None:
             impl_type: str | None = None
             if receiver_name == "self" or receiver_name.startswith("self."):
-                impl_type = caller_impl_ctx.get(src_id)
+                source = (src_node.source_text if src_node else "") or ""
+                impl_type = caller_impl_ctx.get(src_id) or _infer_impl_type_from_source(
+                    source,
+                    src_node.line_start if src_node else None,
+                )
             else:
-                impl_type = (_infer_type_from_let_bindings(
-                    (src_node.source_text if src_node else "") or "", receiver_name
-                ) or _infer_type_from_var_name(receiver_name))
+                source = (src_node.source_text if src_node else "") or ""
+                impl_type = (
+                    _infer_type_from_annotations(source, receiver_name)
+                    or _infer_type_from_let_bindings(source, receiver_name)
+                    or _infer_type_from_var_name(receiver_name)
+                )
 
             if impl_type is not None:
                 # Narrow candidates whose qualified name has impl_type

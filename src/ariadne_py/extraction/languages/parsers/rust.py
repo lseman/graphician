@@ -228,8 +228,10 @@ def _impl_type_name(node: ts.Node) -> str | None:
 
 def _extract_receiver(func_node: ts.Node) -> str | None:
     if func_node.type == "field_expression":
-        obj = _child_by_field(func_node, "object")
-        if obj:
+        # tree-sitter-rust 0.24 exposes the receiver positionally rather
+        # than through an ``object`` field.
+        obj = func_node.child(0)
+        if obj and obj.type == "identifier":
             return _text(obj)
     if func_node.type in ("scoped_identifier", "scoped_type_identifier"):
         text = _text(func_node)

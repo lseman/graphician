@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import heapq
-from collections import defaultdict
 from typing import Any
 
-from ...core.edge import Confidence, EdgeKind
+from ...core.edge import EdgeKind
 from ...core.graph import Graph
 from ...core.id import NodeId
 from ...core.node import Node, NodeKind
@@ -19,12 +18,13 @@ def find_impact(graph: Graph, query: ImpactQuery) -> list[ImpactHit]:
 
     Returns hits sorted by score descending (highest impact first).
     """
-    heap: list[tuple[float, int, int]] = [(0.0, 0, query.seed_id.value)]
+    heap: list[tuple[float, int, int, tuple[EdgeKind, ...]]] = [
+        (0.0, 0, query.seed_id.value, ()),
+    ]
     best: dict[int, tuple[float, int, list[EdgeKind]]] = {}
 
     while heap:
-        neg_cost, distance, nid_val = heapq.heappop(heap)
-        cost = -neg_cost
+        cost, distance, nid_val, via = heapq.heappop(heap)
 
         if distance > query.max_hops:
             continue
@@ -32,7 +32,7 @@ def find_impact(graph: Graph, query: ImpactQuery) -> list[ImpactHit]:
         seen = best.get(nid_val)
         if seen and seen[0] <= cost:
             continue
-        best[nid_val] = (cost, distance, seen[2] if seen else [])
+        best[nid_val] = (cost, distance, list(via))
 
         if distance == query.max_hops:
             continue
@@ -42,8 +42,22 @@ def find_impact(graph: Graph, query: ImpactQuery) -> list[ImpactHit]:
             if pval in best and best[pval][0] <= cost + _impact_cost(edge):
                 continue
             new_cost = cost + _impact_cost(edge)
-            via = (seen[2] if seen else []) + [edge.kind]
-            heapq.heappush(heap, (-new_cost, distance + 1, pval))
+            next_via = via + (edge.kind,)
+            heapq.heappush(heap, (new_cost, distance + 1, pval, next_via))
+
+        # A changed symbol can also require coordinated edits in its direct
+        # dependencies. Follow only structural forward edges and penalize them
+        # more heavily so reverse dependants continue to rank first.
+        for next_id, edge in graph.out_neighbors(NodeId(nid_val)):
+            forward_cost = _forward_impact_cost(edge)
+            if forward_cost is None:
+                continue
+            next_val = next_id.value if isinstance(next_id, NodeId) else next_id
+            new_cost = cost + forward_cost
+            if next_val in best and best[next_val][0] <= new_cost:
+                continue
+            next_via = via + (edge.kind,)
+            heapq.heappush(heap, (new_cost, distance + 1, next_val, next_via))
 
     hits: list[ImpactHit] = []
     for nid_val, (cost, distance, via) in best.items():
@@ -86,6 +100,22 @@ def _impact_cost(edge: Any) -> float:
         EdgeKind.SIMILAR_TO: 2.0,
         EdgeKind.RATIONALE_FOR: 2.0,
     }.get(edge.kind, 1.5)
+    return base / max(edge.confidence.score(), 0.05)
+
+
+def _forward_impact_cost(edge: Any) -> float | None:
+    """Cost for conservative forward traversal from a changed symbol."""
+    base = {
+        EdgeKind.CALLS: 2.25,
+        EdgeKind.IMPORTS: 2.5,
+        EdgeKind.DEPENDS_ON: 2.5,
+        EdgeKind.INHERITS: 1.75,
+        EdgeKind.IMPLEMENTS: 1.75,
+        EdgeKind.DATA_FLOW: 2.0,
+        EdgeKind.READS_WRITES: 2.0,
+    }.get(edge.kind)
+    if base is None:
+        return None
     return base / max(edge.confidence.score(), 0.05)
 
 

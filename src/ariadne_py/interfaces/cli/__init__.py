@@ -313,7 +313,7 @@ def cmd_build(args: argparse.Namespace) -> None:
 
     store = _load_store(args)
     registry = LanguageRegistry()
-    pipeline = ExtractionPipeline(registry)
+    pipeline = ExtractionPipeline(registry, strict=True)
 
     print(f"Building graph from {root}...", file=sys.stderr)
     graph = pipeline.build(root)
@@ -347,7 +347,7 @@ def cmd_update(args: argparse.Namespace) -> None:
     store = _load_store(args)
 
     registry = LanguageRegistry()
-    pipeline = ExtractionPipeline(registry)
+    pipeline = ExtractionPipeline(registry, strict=True)
 
     # Get current file hashes
     files = pipeline.discover_files(root)
@@ -379,7 +379,7 @@ def cmd_update(args: argparse.Namespace) -> None:
     commit = git_commit_hash(root)
     if commit is not None:
         _stamp_valid_from(graph, commit)
-    store.save_graph(graph, pipeline._file_hashes or current_hashes)
+    store.save_graph_incremental(graph, pipeline._file_hashes or current_hashes)
     store.set_metadata("repository_root", str(root))
     if commit is not None:
         store.set_metadata("indexed_commit", commit)
@@ -696,20 +696,16 @@ def cmd_test_coverage(args: argparse.Namespace) -> None:
 
 def cmd_tool(args: argparse.Namespace) -> None:
     """JSON tool interface."""
-    store = _load_store(args)
-    graph = store.load_graph()
     params = json.loads(args.params)
+    from .response import tool_response
 
-    from ..transport.mcp import AriadneMCP
-
-    server = AriadneMCP(str(store.db_path))
-    server.graph = graph
-    server.store = store
-    server._initialized = True
-    result = server._execute_operation(args.operation.replace("-", "_"), params)
+    result = tool_response(
+        str(args.db),
+        args.operation.replace("-", "_"),
+        params,
+    )
 
     print(json.dumps(result, indent=2))
-    store.close()
 
 
 def cmd_generic_operation(args: argparse.Namespace) -> None:

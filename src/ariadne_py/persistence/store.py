@@ -288,6 +288,225 @@ class GraphStore:
             self._set_metadata("edge_count", str(graph.edge_count()))
             self._set_metadata("last_updated", _now_iso())
 
+    def save_graph_incremental(
+        self,
+        graph: Graph,
+        file_hashes: dict[str, str] | None = None,
+    ) -> None:
+        """Synchronize the active graph while preserving unchanged rows.
+
+        Stable node and edge IDs are retained, FTS rows are refreshed only
+        for changed nodes, and local embeddings are regenerated only for the
+        affected nodes. Embeddings from external providers are invalidated for
+        changed nodes because rebuilding them may require network access.
+        """
+        existing_nodes = {
+            row["qualified_name"]: row
+            for row in self._conn.execute("SELECT * FROM nodes").fetchall()
+        }
+        target_qnames = {node.qualified_name for _, node in graph.nodes()}
+        removed_node_ids = {
+            int(row["node_id"])
+            for qname, row in existing_nodes.items()
+            if qname not in target_qnames
+        }
+        embedding_model_row = self._conn.execute(
+            "SELECT model FROM embeddings LIMIT 1"
+        ).fetchone()
+        embedding_model = embedding_model_row["model"] if embedding_model_row else None
+        changed_node_ids: set[int] = set()
+        qname_to_db_id: dict[str, int] = {}
+
+        with self._conn:
+            for _, node in graph.nodes():
+                properties = json.dumps(node.properties)
+                values = (
+                    node.kind.value,
+                    node.name,
+                    node.source_uri,
+                    node.line_start,
+                    node.line_end,
+                    properties,
+                    node.source_text,
+                    node.valid_from,
+                    node.valid_to,
+                )
+                existing = existing_nodes.get(node.qualified_name)
+                if existing is None:
+                    cursor = self._conn.execute(
+                        """INSERT INTO nodes
+                           (kind, name, qualified_name, source_uri, line_start, line_end,
+                            properties, source_text, valid_from, valid_to)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            node.kind.value,
+                            node.name,
+                            node.qualified_name,
+                            node.source_uri,
+                            node.line_start,
+                            node.line_end,
+                            properties,
+                            node.source_text,
+                            node.valid_from,
+                            node.valid_to,
+                        ),
+                    )
+                    db_id = int(cursor.lastrowid)
+                    changed_node_ids.add(db_id)
+                else:
+                    db_id = int(existing["node_id"])
+                    stored = (
+                        existing["kind"],
+                        existing["name"],
+                        existing["source_uri"],
+                        existing["line_start"],
+                        existing["line_end"],
+                        existing["properties"],
+                        existing["source_text"],
+                        existing["valid_from"],
+                        existing["valid_to"],
+                    )
+                    if stored != values:
+                        self._conn.execute(
+                            """UPDATE nodes SET
+                               kind=?, name=?, source_uri=?, line_start=?, line_end=?,
+                               properties=?, source_text=?, valid_from=?, valid_to=?
+                               WHERE node_id=?""",
+                            (*values, db_id),
+                        )
+                        changed_node_ids.add(db_id)
+                qname_to_db_id[node.qualified_name] = db_id
+
+            existing_edges: dict[tuple[Any, ...], list[int]] = {}
+            for row in self._conn.execute("SELECT * FROM edges").fetchall():
+                key = (
+                    row["source_qname"],
+                    row["target_qname"],
+                    row["kind"],
+                    float(row["confidence"]),
+                    row["conf_class"],
+                    row["properties"],
+                    row["valid_from"],
+                    row["valid_to"],
+                )
+                existing_edges.setdefault(key, []).append(int(row["edge_id"]))
+
+            for _, src, dst, edge in graph.edges():
+                src_node = graph.node(src)
+                dst_node = graph.node(dst)
+                if src_node is None or dst_node is None:
+                    continue
+                confidence = edge.confidence.score()
+                conf_class = _confidence_class_name(edge.confidence)
+                properties = json.dumps(edge.properties)
+                key = (
+                    src_node.qualified_name,
+                    dst_node.qualified_name,
+                    edge.kind.value,
+                    confidence,
+                    conf_class,
+                    properties,
+                    edge.valid_from,
+                    edge.valid_to,
+                )
+                retained = existing_edges.get(key)
+                if retained:
+                    retained.pop()
+                    continue
+                self._insert_edge(
+                    edge,
+                    qname_to_db_id[src_node.qualified_name],
+                    qname_to_db_id[dst_node.qualified_name],
+                    src_node.qualified_name,
+                    dst_node.qualified_name,
+                )
+
+            stale_edge_ids = [
+                edge_id for ids in existing_edges.values() for edge_id in ids
+            ]
+            if stale_edge_ids:
+                self._conn.executemany(
+                    "DELETE FROM edges WHERE edge_id=?",
+                    [(edge_id,) for edge_id in stale_edge_ids],
+                )
+
+            invalidated_ids = changed_node_ids | removed_node_ids
+            if invalidated_ids:
+                self._conn.executemany(
+                    "DELETE FROM nodes_fts WHERE node_id=?",
+                    [(node_id,) for node_id in invalidated_ids],
+                )
+                self._conn.executemany(
+                    "DELETE FROM embeddings WHERE node_id=?",
+                    [(node_id,) for node_id in invalidated_ids],
+                )
+
+            if removed_node_ids:
+                self._conn.executemany(
+                    "DELETE FROM nodes WHERE node_id=?",
+                    [(node_id,) for node_id in removed_node_ids],
+                )
+
+            if changed_node_ids:
+                placeholders = ",".join("?" for _ in changed_node_ids)
+                self._conn.execute(
+                    f"""INSERT INTO nodes_fts
+                        (node_id, kind, name, qualified_name, source_text)
+                        SELECT node_id, kind, name, qualified_name, source_text
+                        FROM nodes WHERE node_id IN ({placeholders})""",
+                    tuple(sorted(changed_node_ids)),
+                )
+
+            if file_hashes is not None:
+                self._conn.execute("DELETE FROM file_state")
+                now_unix = int(_now_unix())
+                self._conn.executemany(
+                    "INSERT INTO file_state (path, hash, indexed_at_unix) VALUES (?, ?, ?)",
+                    [(path, value, now_unix) for path, value in file_hashes.items()],
+                )
+
+            self._set_metadata("node_count", str(graph.node_count()))
+            self._set_metadata("edge_count", str(graph.edge_count()))
+            self._set_metadata("last_updated", _now_iso())
+
+        if embedding_model == DEFAULT_EMBEDDING_MODEL and changed_node_ids:
+            self._rebuild_local_embeddings_for_ids(changed_node_ids)
+
+    def _rebuild_local_embeddings_for_ids(self, node_ids: set[int]) -> None:
+        """Regenerate local embeddings for the selected persisted nodes."""
+        if not node_ids:
+            return
+        placeholders = ",".join("?" for _ in node_ids)
+        rows = self._conn.execute(
+            f"""SELECT node_id, kind, name, qualified_name, source_uri, source_text
+                FROM nodes
+                WHERE node_id IN ({placeholders})
+                  AND qualified_name NOT LIKE 'call::%'""",
+            tuple(sorted(node_ids)),
+        ).fetchall()
+        with self._conn:
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO embeddings (node_id, model, vector) VALUES (?, ?, ?)",
+                [
+                    (
+                        row["node_id"],
+                        DEFAULT_EMBEDDING_MODEL,
+                        encode_embedding(
+                            semantic_embedding(
+                                embedding_source_text(
+                                    row["kind"],
+                                    row["name"],
+                                    row["qualified_name"],
+                                    row["source_uri"],
+                                    row["source_text"],
+                                )
+                            )
+                        ),
+                    )
+                    for row in rows
+                ],
+            )
+
     def _insert_node(self, node: Node) -> int:
         """Insert a node and return its database ID."""
         cursor = self._conn.execute(

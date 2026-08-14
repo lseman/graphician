@@ -19,7 +19,7 @@ def compute_test_coverage(
     """
     # Find all tested symbols
     tested: set[str] = set()
-    for _, src, dst, edge in graph.edges():
+    for _, src, _dst, edge in graph.edges():
         if edge.kind == EdgeKind.TESTED_BY:
             src_node = graph.node(src)
             if src_node:
@@ -27,15 +27,18 @@ def compute_test_coverage(
 
     # Find untested symbols
     untested: list[dict[str, Any]] = []
-    for nid, node in graph.nodes():
-        if node.kind in (NodeKind.FUNCTION, NodeKind.METHOD, NodeKind.CLASS):
-            if node.qualified_name not in tested:
-                untested.append({
-                    "qualified_name": node.qualified_name,
-                    "kind": node.kind.value,
-                    "name": node.name,
-                    "source_uri": node.source_uri,
-                })
+    for _nid, node in graph.nodes():
+        if (
+            node.kind in (NodeKind.FUNCTION, NodeKind.METHOD, NodeKind.CLASS)
+            and not node.properties.get("is_test")
+            and node.qualified_name not in tested
+        ):
+            untested.append({
+                "qualified_name": node.qualified_name,
+                "kind": node.kind.value,
+                "name": node.name,
+                "source_uri": node.source_uri,
+            })
 
     untested.sort(key=lambda x: x["qualified_name"])
 
@@ -45,6 +48,6 @@ def compute_test_coverage(
     return {
         "coverage": round(coverage, 4),
         "tested_count": len(tested),
-        "untested_count": total,
+        "untested_count": len(untested),
         "untested": untested[:100],
     }

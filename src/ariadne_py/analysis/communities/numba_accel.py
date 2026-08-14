@@ -14,6 +14,17 @@ try:
 except ImportError:
     _HAS_NUMBA = False
 
+    def njit(*args, **kwargs):
+        """Return the original function when Numba is unavailable."""
+        del args, kwargs
+
+        def decorator(function):
+            return function
+
+        return decorator
+
+    prange = range
+
 
 # ── CSR builder ────────────────────────────────────────────────────
 

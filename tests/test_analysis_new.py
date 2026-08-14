@@ -4,36 +4,32 @@ Covers: paths, impact, search, centrality — all aligned with the Rust
 reference implementation at ariadne-graph/src/analysis/.
 """
 
-import pytest
-
-from ariadne_py.core.edge import Confidence, Edge, EdgeKind
-from ariadne_py.core.graph import Graph
-from ariadne_py.core.id import NodeId
-from ariadne_py.core.node import Node, NodeKind
-from ariadne_py.analysis.paths import (
-    callees_of,
-    callers_of,
-    find_paths,
-    find_top_paths,
-    max_depth_from,
-    PathQuery,
-    WeightedPath,
-)
-from ariadne_py.analysis.impact import ImpactQuery, ImpactHit, find_impact
-from ariadne_py.analysis.search import (
-    SearchIntent,
-    SearchHit,
-    fts_ranked_search,
-    ranked_search,
-    search_by_name,
-    task_aware_search,
-)
 from ariadne_py.analysis.centrality import (
     is_rank_noise,
     pagerank,
     personalized_pagerank,
 )
-
+from ariadne_py.analysis.impact import ImpactQuery, find_impact
+from ariadne_py.analysis.paths import (
+    PathQuery,
+    WeightedPath,
+    callees_of,
+    callers_of,
+    find_paths,
+    find_top_paths,
+    max_depth_from,
+)
+from ariadne_py.analysis.search import (
+    SearchIntent,
+    fts_ranked_search,
+    ranked_search,
+    search_by_name,
+    task_aware_search,
+)
+from ariadne_py.core.edge import Confidence, Edge, EdgeKind
+from ariadne_py.core.graph import Graph
+from ariadne_py.core.id import NodeId
+from ariadne_py.core.node import Node, NodeKind
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -147,6 +143,21 @@ class TestFindImpact:
         g.add_edge(b, c, Edge.extracted(EdgeKind.CALLS))
         hits = find_impact(g, ImpactQuery(seed_id=c, max_hops=1, limit=10))
         assert len(hits) == 1  # Only b (dist=1), not a (dist=2)
+
+    def test_includes_direct_dependencies_below_reverse_dependants(self):
+        g = Graph()
+        caller = g.add_node(Node.new(NodeKind.FUNCTION, "caller"))
+        seed = g.add_node(Node.new(NodeKind.FUNCTION, "seed"))
+        dependency = g.add_node(Node.new(NodeKind.FUNCTION, "dependency"))
+        g.add_edge(caller, seed, Edge.extracted(EdgeKind.CALLS))
+        g.add_edge(seed, dependency, Edge.extracted(EdgeKind.CALLS))
+
+        hits = find_impact(g, ImpactQuery(seed_id=seed, max_hops=1, limit=10))
+
+        assert [hit.id for hit in hits] == [caller, dependency]
+        assert hits[0].score > hits[1].score
+        assert hits[0].via == [EdgeKind.CALLS]
+        assert hits[1].via == [EdgeKind.CALLS]
 
 
 # ── Search ───────────────────────────────────────────────────────────

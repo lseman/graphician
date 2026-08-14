@@ -8,6 +8,9 @@ dist/
 build/
 .eggs/
 *.egg
+.coverage
+coverage.xml
+htmlcov/
 
 # Virtual environments
 .venv/

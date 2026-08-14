@@ -179,6 +179,58 @@ def test_snapshots_embeddings_and_temporal_diff_round_trip(tmp_path: Path) -> No
         assert store.rebuild_fts() == 2
 
 
+def test_incremental_save_preserves_stable_rows_and_updates_indexes(tmp_path: Path) -> None:
+    initial = Graph()
+    node_a = Node.new(NodeKind.FUNCTION, "pkg::a").with_source_text("def a(): pass")
+    a = initial.add_node(node_a)
+    b = initial.add_node(Node.new(NodeKind.FUNCTION, "pkg::b"))
+    initial.add_edge(a, b, Edge.extracted(EdgeKind.CALLS))
+
+    with GraphStore(tmp_path / "graph.db") as store:
+        store.save_graph(initial)
+        store.rebuild_embeddings()
+        before = store._conn.execute(
+            """SELECT n.node_id, e.edge_id, v.vector
+               FROM nodes n
+               JOIN edges e ON e.source_id=n.node_id
+               JOIN embeddings v ON v.node_id=n.node_id
+               WHERE n.qualified_name='pkg::a'"""
+        ).fetchone()
+        assert before is not None
+
+        store.save_graph_incremental(initial)
+        unchanged = store._conn.execute(
+            """SELECT n.node_id, e.edge_id, v.vector
+               FROM nodes n
+               JOIN edges e ON e.source_id=n.node_id
+               JOIN embeddings v ON v.node_id=n.node_id
+               WHERE n.qualified_name='pkg::a'"""
+        ).fetchone()
+        assert tuple(unchanged) == tuple(before)
+
+        updated = Graph()
+        changed_a = Node.new(NodeKind.FUNCTION, "pkg::a").with_source_text("def renamed(): pass")
+        changed_a.name = "renamed"
+        a2 = updated.add_node(changed_a)
+        c = updated.add_node(Node.new(NodeKind.CLASS, "pkg::c"))
+        updated.add_edge(a2, c, Edge.extracted(EdgeKind.DEFINES))
+        store.save_graph_incremental(updated, {"pkg.py": "new-hash"})
+
+        loaded = store.load_graph()
+        loaded_a_id = loaded.find_by_qname("pkg::a")
+        assert loaded_a_id is not None
+        assert loaded.node(loaded_a_id).name == "renamed"
+        assert loaded.find_by_qname("pkg::b") is None
+        assert loaded.find_by_qname("pkg::c") is not None
+        persisted_a = store._conn.execute(
+            "SELECT node_id FROM nodes WHERE qualified_name='pkg::a'"
+        ).fetchone()
+        assert persisted_a["node_id"] == before["node_id"]
+        assert store.get_file_hashes() == {"pkg.py": "new-hash"}
+        assert any(hit[0] == "pkg::a" for hit in store.fts_search("renamed", 10))
+        assert store.get_embedding_stats()[0] == 2
+
+
 def test_extended_tool_operations_share_mcp_dispatch() -> None:
     graph = Graph()
     graph.add_node(Node.new(NodeKind.FUNCTION, "pkg::entry"))
@@ -192,3 +244,24 @@ def test_extended_tool_operations_share_mcp_dispatch() -> None:
     assert traversal["items"][0]["qualified_name"] == "pkg::entry"
     assert "orphan_nodes" in server._execute_operation("diagnostics", {})
     assert "patterns" in server._execute_operation("patterns", {})
+
+
+def test_legacy_mcp_search_matches_current_hybrid_search_signature() -> None:
+    graph = Graph()
+    graph.add_node(Node.new(NodeKind.FUNCTION, "pkg::entry"))
+    server = AriadneMCP()
+    server.graph = graph
+    server._initialized = True
+
+    result = server._execute_operation("search", {"query": "entry"})
+
+    assert result[0].node.qualified_name == "pkg::entry"
+
+
+def test_strict_pipeline_reports_invalid_source(tmp_path: Path) -> None:
+    source = tmp_path / "invalid.rs"
+    source.write_bytes(b"\xff\xfe")
+    pipeline = ExtractionPipeline(LanguageRegistry(), strict=True)
+
+    with pytest.raises(UnicodeError):
+        pipeline.build(tmp_path)

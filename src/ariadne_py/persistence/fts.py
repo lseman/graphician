@@ -140,5 +140,10 @@ def build_fts5_query(raw: str) -> str:
         # Strip special FTS5 characters and collect non-empty tokens
         clean = re.sub(r'[^a-zA-Z0-9_]', '', raw_token)
         if clean:
-            tokens.append(f"{clean}*")
+            # FTS5 treats these bare words as operators. Quote them so raw
+            # user input remains a literal, valid prefix query.
+            if clean.upper() in {"AND", "OR", "NOT", "NEAR"}:
+                tokens.append(f'"{clean}"*')
+            else:
+                tokens.append(f"{clean}*")
     return " ".join(tokens)

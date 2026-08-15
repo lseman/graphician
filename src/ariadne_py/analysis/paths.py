@@ -20,12 +20,10 @@ node, optionally restricted to specific edge kinds.
 
 from __future__ import annotations
 
-import math
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any
 
-from ..core.edge import Confidence, EdgeKind
+from ..core.edge import EdgeKind
 from ..core.graph import Graph
 from ..core.id import NodeId
 from ..core.node import NodeKind
@@ -145,11 +143,10 @@ def find_paths(graph: Graph, q: PathQuery) -> list[list[NodeId]]:
             continue
         last = path[-1]
         # Record path when at target (or anywhere if no target specified)
-        if len(path) > 1:
-            if q.to_id is None or last == q.to_id:
-                results.append(list(path))
-                if q.to_id is not None and len(path) > q.max_hops:
-                    continue
+        if len(path) > 1 and (q.to_id is None or last == q.to_id):
+            results.append(list(path))
+            if q.to_id is not None and len(path) > q.max_hops:
+                continue
         for neighbor, edge in graph.out_neighbors(last):
             if neighbor in path:
                 continue
@@ -184,14 +181,14 @@ def find_top_paths(
             self.nodes = nodes
             self.cost = cost
 
-        def __lt__(self, other: "_Candidate") -> bool:
+        def __lt__(self, other: _Candidate) -> bool:
             return self.cost < other.cost
 
     heap: list[_Candidate] = [_Candidate([q.from_id], 0.0)]
     chosen: list[WeightedPath] = []
 
     while heap and len(chosen) < limit * 3:
-        cand = heap.pop(0) if heap else None
+        cand = heapq.heappop(heap) if heap else None
         if cand is None:
             break
 
@@ -237,7 +234,7 @@ def find_top_paths(
             if edge.confidence.score() < q.min_confidence:
                 continue
             new_cost = cand.cost + _path_edge_cost(edge.kind, edge.confidence.score())
-            heap.append(_Candidate(cand.nodes + [neighbor], new_cost))
+            heapq.heappush(heap, _Candidate(cand.nodes + [neighbor], new_cost))
 
     # Sort and limit
     chosen.sort(key=lambda p: p.cost)

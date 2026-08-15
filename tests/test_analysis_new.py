@@ -113,6 +113,32 @@ class TestFindTopPaths:
         assert isinstance(paths[0], WeightedPath)
         assert paths[0].cost > 0
 
+    def test_uses_cost_priority_before_early_limit(self):
+        g = Graph()
+        start = g.add_node(Node.new(NodeKind.FUNCTION, "start"))
+        target = g.add_node(Node.new(NodeKind.FUNCTION, "target"))
+
+        # A FIFO worklist fills the internal candidate limit with these
+        # expensive routes before it discovers the cheaper two-hop route.
+        for index in range(3):
+            direct = g.add_node(Node.new(NodeKind.FUNCTION, f"direct_{index}"))
+            g.add_edge(start, direct, Edge.extracted(EdgeKind.SIMILAR_TO))
+            g.add_edge(direct, target, Edge.extracted(EdgeKind.SIMILAR_TO))
+
+        helper = g.add_node(Node.new(NodeKind.FUNCTION, "helper"))
+        g.add_edge(start, helper, Edge.extracted(EdgeKind.DEFINES))
+        g.add_edge(helper, target, Edge.extracted(EdgeKind.DEFINES))
+
+        paths = find_top_paths(
+            g,
+            PathQuery(from_id=start, to_id=target, max_hops=2),
+            limit=1,
+        )
+
+        assert len(paths) == 1
+        assert paths[0].nodes == [start, helper, target]
+        assert paths[0].cost == 0.7
+
 
 # ── Impact ───────────────────────────────────────────────────────────
 

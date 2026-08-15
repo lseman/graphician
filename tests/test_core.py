@@ -159,19 +159,21 @@ class TestGraph:
         g1.merge(g2)
         assert g1.edge_count() == 1
 
-    def test_self_loop_skipped(self):
+    def test_self_loop_preserved_like_rust_graph(self):
         g = Graph()
         a = g.add_node(Node.new(NodeKind.FUNCTION, "m::f"))
         eid = g.add_edge(a, a, Edge.extracted(EdgeKind.CALLS))
-        assert eid.value == -1
+        assert eid.value == 0
+        assert g.edge_count() == 1
 
-    def test_duplicate_edge_skipped(self):
+    def test_parallel_edge_preserved_like_rust_graph(self):
         g = Graph()
         a = g.add_node(Node.new(NodeKind.FUNCTION, "m::f"))
         b = g.add_node(Node.new(NodeKind.FUNCTION, "m::g"))
         g.add_edge(a, b, Edge.extracted(EdgeKind.CALLS))
         eid = g.add_edge(a, b, Edge.extracted(EdgeKind.CALLS))
-        assert eid.value == -1
+        assert eid.value == 1
+        assert g.edge_count() == 2
 
     def test_iteration(self):
         g = Graph()

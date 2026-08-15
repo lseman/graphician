@@ -165,13 +165,12 @@ def _build_caller_impl_context(graph: Graph) -> dict[NodeId, str]:
         parts = qn.split("::")
         if len(parts) < 2:
             continue
-        for part in reversed(parts[1:]):
-            if part == "file" or not part:
-                continue
-            if part.startswith("./") or part.startswith("/") or part.endswith(".rs"):
-                continue
-            context[nid] = part
-            break
+        # Extracted method names are always the final qname component and
+        # their owning class/impl is immediately before it.  Walking backward
+        # used to select the method name itself, which made ``self.foo()``
+        # impossible to disambiguate when several classes defined ``foo``.
+        if len(parts) >= 2 and parts[-2]:
+            context[nid] = parts[-2]
     return context
 
 

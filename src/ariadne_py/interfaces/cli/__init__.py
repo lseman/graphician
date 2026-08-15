@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,8 @@ from ...analysis.context_pack import build_context_pack
 from ...analysis.diff import graph_diff
 from ...extraction.compiler import apply_compiler_evidence, load_compiler_evidence
 from ...extraction.rust_analyzer import RustAnalyzerOptions, enrich_with_rust_analyzer
+from ...extraction.jedi import enrich_jedi_calls
+from ...extraction.spring_di import resolve_spring_injections
 from .git import git_commit_hash, graph_freshness
 from ...persistence.embeddings import build_external_embeddings, build_local_embeddings
 
@@ -53,11 +56,12 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     """Entry point for the ariadne CLI."""
+    sys.argv[1:] = _normalize_grouped_argv(sys.argv[1:])
     parser = argparse.ArgumentParser(
         prog="ariadne",
         description="A local-first code graph for navigating, reviewing, and reasoning about a codebase.",
     )
-    parser.add_argument("--db", default="ariadne.db", help="Path to SQLite database")
+    parser.add_argument("-d", "--db", default="ariadne.db", help="Path to SQLite database")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -90,13 +94,15 @@ def main() -> None:
     impact_p = subparsers.add_parser("impact", help="Impact analysis")
     impact_p.add_argument("target", help="Target symbol")
     impact_p.add_argument("--max-hops", type=int, default=4)
-    impact_p.add_argument("--limit", type=int, default=25)
+    impact_p.add_argument("--top", "--limit", dest="limit", type=int, default=25)
 
     # paths
     paths_p = subparsers.add_parser("paths", help="Find paths between symbols")
     paths_p.add_argument("source", help="Source symbol")
     paths_p.add_argument("target", help="Target symbol")
-    paths_p.add_argument("--max-hops", type=int, default=6)
+    paths_p.add_argument("--max-hops", type=int, default=5)
+    paths_p.add_argument("--top", type=int, default=10)
+    paths_p.add_argument("--structural-only", action="store_true")
 
     # callers
     callers_p = subparsers.add_parser("callers", help="Find callers of a symbol")
@@ -111,27 +117,35 @@ def main() -> None:
     flows_p.add_argument("--top", type=int, default=20)
 
     # architecture
-    subparsers.add_parser("architecture", help="Architecture overview")
+    architecture_p = subparsers.add_parser("architecture", help="Architecture overview")
+    architecture_p.add_argument("--detail-level", default="standard")
 
     # communities
     comm_p = subparsers.add_parser("communities", help="Community detection")
     comm_p.add_argument("--algorithm", default="louvain", choices=["louvain", "leiden", "infomap"])
+    comm_p.add_argument("--top", type=int, default=20)
 
     # bridge-nodes
-    subparsers.add_parser("bridge-nodes", help="Find bridge/chokepoint nodes")
+    bridge_p = subparsers.add_parser("bridge-nodes", help="Find bridge/chokepoint nodes")
+    bridge_p.add_argument("--top", type=int, default=25)
 
     # god-nodes
-    subparsers.add_parser("god-nodes", help="Find top PageRank nodes")
+    god_p = subparsers.add_parser("god-nodes", help="Find top PageRank nodes")
+    god_p.add_argument("--top", type=int, default=10)
+    god_p.add_argument("--seed")
 
     # cycles
-    subparsers.add_parser("cycles", help="Find dependency cycles")
+    cycles_p = subparsers.add_parser("cycles", help="Find dependency cycles")
+    cycles_p.add_argument("--top", type=int, default=25)
 
     # articulation
-    subparsers.add_parser("articulation", help="Find articulation points")
+    articulation_p = subparsers.add_parser("articulation", help="Find articulation points")
+    articulation_p.add_argument("--top", type=int, default=25)
 
     # large-functions
     lf_p = subparsers.add_parser("large-functions", help="Find large functions")
-    lf_p.add_argument("--min-lines", type=int, default=30)
+    lf_p.add_argument("--min-lines", type=int, default=80)
+    lf_p.add_argument("--top", type=int, default=50)
 
     # dead-code
     subparsers.add_parser("dead-code", help="Find unreachable code")
@@ -139,14 +153,18 @@ def main() -> None:
     # counterfactual
     cf_p = subparsers.add_parser("counterfactual", help="What breaks if removed?")
     cf_p.add_argument("target", help="Target symbol")
+    cf_p.add_argument("--direction", default="out")
+    cf_p.add_argument("--max-depth", type=int, default=5)
 
     # motifs
     motif_p = subparsers.add_parser("motifs", help="Subgraph motif matching")
-    motif_p.add_argument("--pattern", default="diamond", choices=["diamond", "feedback", "fan_in", "fan_out"])
+    motif_p.add_argument("--built-in", "--pattern", dest="pattern", default="security_audit")
+    motif_p.add_argument("--limit", type=int, default=50)
 
     # detect-changes
     dc_p = subparsers.add_parser("detect-changes", help="Detect changes from Git diff")
     dc_p.add_argument("--base", help="Git base reference")
+    dc_p.add_argument("--max-depth", type=int, default=2)
     dc_p.add_argument("--brief", action="store_true", help="Brief output")
 
     # risk
@@ -155,7 +173,9 @@ def main() -> None:
     risk_p.add_argument("--top", type=int, default=25)
 
     # test-coverage
-    subparsers.add_parser("test-coverage", help="Test coverage analysis")
+    coverage_p = subparsers.add_parser("test-coverage", help="Test coverage analysis")
+    coverage_p.add_argument("target", nargs="?")
+    coverage_p.add_argument("--base")
 
     generic_operations = {
         "traverse": "Budgeted graph traversal",
@@ -177,14 +197,48 @@ def main() -> None:
     for name, help_text in generic_operations.items():
         operation_p = subparsers.add_parser(name, help=help_text)
         operation_p.add_argument("--params", default="{}", help="JSON operation parameters")
+        if name in {"traverse", "rename-preview"}:
+            operation_p.add_argument("target")
+        if name == "rename-preview":
+            operation_p.add_argument("new_name")
+        if name == "report":
+            operation_p.add_argument("output")
+        if name in {"review-context", "affected-flows", "blast-radius", "suggested-questions"}:
+            operation_p.add_argument("--base", default="HEAD~1")
+        if name in {"affected-flows", "blast-radius", "core", "gaps", "diagnostics", "surprises", "suggested-questions", "report"}:
+            operation_p.add_argument("--top", type=int)
+        if name == "traverse":
+            operation_p.add_argument("--direction", default="both")
+            operation_p.add_argument("--max-depth", type=int, default=3)
+            operation_p.add_argument("--token-budget", type=int, default=1200)
+        if name == "review-context":
+            operation_p.add_argument("--max-lines-per-file", type=int, default=200)
+            operation_p.add_argument("--token-budget", type=int, default=1600)
+        if name == "blast-radius":
+            operation_p.add_argument("--max-depth", type=int, default=2)
+        if name == "dedup":
+            operation_p.add_argument("--threshold", type=float, default=0.92)
+            operation_p.add_argument("--community-boost", type=float, default=0.05)
+            operation_p.add_argument("--community-algo")
+        if name == "patterns":
+            operation_p.add_argument("--format", default="json")
+        if name == "token-savings":
+            operation_p.add_argument("--mode", default="json")
+            operation_p.add_argument("--include-files", action="store_true")
+        if name == "token-benchmark":
+            operation_p.add_argument("-q", "--question", action="append")
+            operation_p.add_argument("--mode", default="json")
 
     diff_p = subparsers.add_parser("graph-diff", help="Diff two stored revisions")
-    diff_p.add_argument("base")
-    diff_p.add_argument("head")
+    diff_p.add_argument("base_pos", nargs="?")
+    diff_p.add_argument("head_pos", nargs="?")
+    diff_p.add_argument("--base", default="HEAD~1")
+    diff_p.add_argument("--head", default="HEAD")
+    diff_p.add_argument("--top", type=int, default=50)
 
     snapshot_p = subparsers.add_parser("snapshot-diff", help="Diff two graph databases")
-    snapshot_p.add_argument("base_db")
-    snapshot_p.add_argument("head_db")
+    snapshot_p.add_argument("databases", nargs="+")
+    snapshot_p.add_argument("--top", type=int, default=50)
 
     subparsers.add_parser("snapshots", help="List stored graph snapshots")
     subparsers.add_parser("rebuild-fts", help="Rebuild the FTS index")
@@ -193,20 +247,37 @@ def main() -> None:
     embed_p.add_argument("--model", default="all-MiniLM-L6-v2")
 
     external_p = subparsers.add_parser("embed-external", help="Build persistent remote embeddings")
-    external_p.add_argument("--provider", required=True, choices=["openai", "google", "ollama"])
-    external_p.add_argument("--model", required=True)
+    external_p.add_argument(
+        "--provider",
+        required=True,
+        choices=["openai", "google", "ollama", "openai-embedding", "google-embedding", "ollama-embedding"],
+    )
+    external_p.add_argument("--model")
     external_p.add_argument("--api-key")
+    external_p.add_argument("--api-key-env")
     external_p.add_argument("--base-url")
+    external_p.add_argument("--dimension", type=int)
     external_p.add_argument("--batch-size", type=int, default=64)
+
+    subparsers.add_parser("jedi-enrich", help="Enrich Python call edges using Jedi")
+    subparsers.add_parser("spring-di-resolve", help="Resolve Spring dependency injection")
+
+    eval_p = subparsers.add_parser("eval", help="Run evaluation benchmarks")
+    eval_p.add_argument("--repos", nargs="*")
+    eval_p.add_argument("--benchmarks", help="Comma-separated benchmark names")
+    eval_p.add_argument("--output-dir", default="evaluate/results")
+    eval_p.add_argument("--embed", action="store_true")
 
     # watch
     watch_p = subparsers.add_parser("watch", help="Watch project and update graph")
     watch_p.add_argument("path", nargs="?", default=".", help="Project root")
-    watch_p.add_argument("--interval", type=int, default=5, help="Poll interval (s, fallback)")
+    watch_p.add_argument("--interval", type=int, default=2, help="Poll interval (s, fallback)")
 
     # serve
     serve_p = subparsers.add_parser("serve", help="Start graph explorer HTTP server")
-    serve_p.add_argument("--bind", default="127.0.0.1:8080", help="Address:port to bind")
+    serve_p.add_argument("--bind", help="Address:port to bind")
+    serve_p.add_argument("--host", default="127.0.0.1")
+    serve_p.add_argument("--port", type=int, default=8787)
     serve_p.add_argument("--algorithm", default="louvain", choices=["louvain", "leiden", "infomap"])
 
     # tool
@@ -227,11 +298,12 @@ def main() -> None:
     daemon_p.add_argument("subcommand", choices=["add", "start", "status"], help="Daemon subcommand")
     daemon_p.add_argument("path", nargs="?", default=".", help="Repository path")
     daemon_p.add_argument("--alias", default="", help="Repository alias")
-    daemon_p.add_argument("--interval", type=int, default=30, help="Poll interval (s)")
+    daemon_p.add_argument("--interval", type=int, default=5, help="Poll interval (s)")
 
     # install
     install_p = subparsers.add_parser("install", help="Install git hooks and agent configs")
     install_p.add_argument("path", nargs="?", default=".", help="Repository root")
+    install_p.add_argument("--repo")
     install_p.add_argument("--force", action="store_true", help="Overwrite existing")
     install_p.add_argument("--agents", action="store_true", help="Install AGENTS.md")
     install_p.add_argument("--mcp", action="store_true", help="Install MCP configs")
@@ -281,6 +353,9 @@ def main() -> None:
         "rebuild-fts": cmd_rebuild_fts,
         "embed": cmd_embed,
         "embed-external": cmd_embed_external,
+        "jedi-enrich": cmd_jedi_enrich,
+        "spring-di-resolve": cmd_spring_di_resolve,
+        "eval": cmd_eval,
         "watch": cmd_watch,
         "serve": cmd_serve,
         "wiki": cmd_wiki,
@@ -710,16 +785,57 @@ def cmd_tool(args: argparse.Namespace) -> None:
 
 def cmd_generic_operation(args: argparse.Namespace) -> None:
     args.operation = args.command.replace("-", "_")
+    params = json.loads(args.params)
+    ignored = {"command", "db", "verbose", "params", "operation"}
+    for key, value in vars(args).items():
+        if key not in ignored and value is not None:
+            params[key] = value
+    if "question" in params:
+        params["questions"] = params.pop("question")
+    args.params = json.dumps(params)
     cmd_tool(args)
+
+
+def _normalize_grouped_argv(argv: list[str]) -> list[str]:
+    """Accept the Rust command hierarchy while retaining flat aliases."""
+    result = list(argv)
+    index = 0
+    while index < len(result):
+        if result[index] in {"-d", "--db"}:
+            index += 2
+            continue
+        if result[index] in {"-v", "--verbose"}:
+            index += 1
+            continue
+        break
+    if index >= len(result):
+        return result
+    group = result[index]
+    grouped = {"analysis", "git", "structure", "advanced", "agent", "maintenance", "utility"}
+    if group in grouped and index + 1 < len(result):
+        result.pop(index)
+    elif group == "build" and index + 1 < len(result):
+        nested = result[index + 1]
+        if nested in {"update", "watch", "daemon", "install", "serve", "status"}:
+            result[index : index + 2] = [nested]
+    return result
 
 
 def cmd_graph_diff(args: argparse.Namespace) -> None:
     with _load_store(args) as store:
-        print(json.dumps(graph_diff(store.load_graph_at(args.base), store.load_graph_at(args.head)), indent=2))
+        base = args.base_pos or args.base
+        head = args.head_pos or args.head
+        print(json.dumps(graph_diff(store.load_graph_at(base), store.load_graph_at(head)), indent=2))
 
 
 def cmd_snapshot_diff(args: argparse.Namespace) -> None:
-    with GraphStore(args.base_db) as base, GraphStore(args.head_db) as head:
+    if len(args.databases) == 1:
+        base_db, head_db = args.db, args.databases[0]
+    elif len(args.databases) == 2:
+        base_db, head_db = args.databases
+    else:
+        raise ValueError("snapshot-diff expects HEAD_DB or BASE_DB HEAD_DB")
+    with GraphStore(base_db) as base, GraphStore(head_db) as head:
         print(json.dumps(graph_diff(base.load_graph(), head.load_graph()), indent=2))
 
 
@@ -742,17 +858,54 @@ def cmd_embed(args: argparse.Namespace) -> None:
 
 def cmd_embed_external(args: argparse.Namespace) -> None:
     with _load_store(args) as store:
+        provider = args.provider.removesuffix("-embedding")
+        model = args.model or {
+            "openai": "text-embedding-3-small",
+            "google": "text-embedding-004",
+            "ollama": "nomic-embed-text",
+        }[provider]
+        api_key = args.api_key or (os.getenv(args.api_key_env) if args.api_key_env else None)
         vectors = build_external_embeddings(
             store.load_graph(),
-            provider=args.provider,
-            model=args.model,
-            api_key=args.api_key,
+            provider=provider,
+            model=model,
+            api_key=api_key,
             base_url=args.base_url,
             batch_size=args.batch_size,
         )
-        model_key = f"{args.provider}:{args.model}"
+        model_key = f"{provider}:{model}"
         store.save_embeddings(model_key, vectors)
         print(json.dumps({"model": model_key, "indexed": len(vectors)}))
+
+
+def cmd_jedi_enrich(args: argparse.Namespace) -> None:
+    with _load_store(args) as store:
+        graph = store.load_graph()
+        root = Path(store.get_metadata("repository_root") or ".")
+        added = enrich_jedi_calls(graph, root)
+        store.save_graph_incremental(graph, store.get_file_hashes())
+        print(json.dumps({"operation": "jedi_enrich", "added": added}))
+
+
+def cmd_spring_di_resolve(args: argparse.Namespace) -> None:
+    with _load_store(args) as store:
+        graph = store.load_graph()
+        added = resolve_spring_injections(graph)
+        store.save_graph_incremental(graph, store.get_file_hashes())
+        print(json.dumps({"operation": "spring_di_resolve", "added": added}))
+
+
+def cmd_eval(args: argparse.Namespace) -> None:
+    from ...evaluation import run_eval
+
+    benchmarks = args.benchmarks.split(",") if args.benchmarks else []
+    results = run_eval(
+        repos=args.repos or [],
+        benchmarks=benchmarks,
+        output_dir=Path(args.output_dir),
+        embed=args.embed,
+    )
+    print(json.dumps({"operation": "eval", "results": results}, indent=2))
 
 
 def cmd_mcp_server(args: argparse.Namespace) -> None:
@@ -771,7 +924,7 @@ def cmd_watch(args: argparse.Namespace) -> None:
 def cmd_serve(args: argparse.Namespace) -> None:
     """Start graph explorer HTTP server."""
     from .serve import cmd_serve as _serve
-    _serve(args.db, args.bind, args.algorithm)
+    _serve(args.db, args.bind or f"{args.host}:{args.port}", args.algorithm)
 
 
 def cmd_wiki(args: argparse.Namespace) -> None:
@@ -789,7 +942,7 @@ def cmd_daemon(args: argparse.Namespace) -> None:
 def cmd_install(args: argparse.Namespace) -> None:
     """Install git hooks and agent configs."""
     from .daemon import cmd_install as _install
-    _install(args.db, args.path, args.force, args.agents, args.mcp)
+    _install(args.db, args.repo or args.path, args.force, args.agents, args.mcp)
 
 
 def _node_to_dict(graph: Graph, qname: str) -> dict[str, Any] | None:

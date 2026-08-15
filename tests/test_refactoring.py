@@ -69,7 +69,7 @@ class TestRenameStats:
         assert stats.total == 4
 
 
-class TestRenamePreview:
+class TestRenamePreviewSerialization:
     def test_to_dict(self):
         preview = RenamePreview(
             target_qname="pkg::foo",

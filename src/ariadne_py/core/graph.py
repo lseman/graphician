@@ -126,11 +126,7 @@ class Graph:
     # ── Edge operations ──────────────────────────────────────────────
 
     def add_edge(self, src: NodeId, dst: NodeId, edge: Edge) -> EdgeId:
-        """Add a directed edge. Skips self-loops and duplicate (src,dst,kind)."""
-        if src.value == dst.value:
-            return EdgeId(-1)
-        if self._has_edge_kind(src.value, dst.value, edge.kind):
-            return EdgeId(-1)
+        """Add a directed edge, preserving self-loops and parallel edges."""
         eid = self._next_edge_id
         self._next_edge_id += 1
         self._edges[eid] = (src.value, dst.value, edge)
@@ -210,17 +206,20 @@ class Graph:
         Nodes with matching qualified names are deduplicated. Edges are
         added with original semantics — duplicates skipped.
         """
-        own_qn: dict[str, int] = {n.qualified_name: i for i, n in self._nodes.items()}
-        remap: dict[int, int] = {}
+        own_qn: dict[str, NodeId] = {
+            node.qualified_name: NodeId(index)
+            for index, node in self._nodes.items()
+        }
+        remap: dict[int, NodeId] = {}
 
-        for idx, (_, node) in enumerate(other.nodes()):
+        for other_id, node in other.nodes():
             qn = node.qualified_name
             if qn in own_qn:
                 mapped = own_qn[qn]
             else:
                 mapped = self.add_node(node)
                 own_qn[qn] = mapped
-            remap[idx] = mapped
+            remap[other_id.value] = mapped
 
         for _, src, dst, edge in other.edges():
             si = remap.get(src.value)
@@ -229,8 +228,8 @@ class Graph:
                 continue
             if si == di:
                 continue
-            if not self._has_edge_kind(si, di, edge.kind):
-                self.add_edge(NodeId(si), NodeId(di), edge)
+            if not self._has_edge_kind(si.value, di.value, edge.kind):
+                self.add_edge(si, di, edge)
 
     # ── Internal helpers ─────────────────────────────────────────────
 

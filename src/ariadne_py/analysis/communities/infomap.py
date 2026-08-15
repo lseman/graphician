@@ -30,7 +30,7 @@ from .core import (
     relabel,
 )
 from .numba_accel import _random_walk_init_csr, build_csr_from_working, has_numba
-from .utils import _find_community, _to_networkx
+from .utils import _find_cross_community_edges, _modularity, _to_networkx
 
 
 # ── LCG RNG ─────────────────────────────────────────────────────────
@@ -667,7 +667,7 @@ def _infomap_refinement(
     # Assemble global
     result: list[int] = [total_labels] * n
     for idx, (_, members) in enumerate(parents):
-        for u, label in zip(members, per_parent_labels[idx]):
+        for u, label in zip(members, per_parent_labels[idx], strict=True):
             result[u] = label
 
     # Enforce connectivity
@@ -688,11 +688,14 @@ def detect_communities(
 
     Returns community assignments, quality metrics, and cross-community edges.
     """
-    communities = infomap_with_options(graph, CommunityOptions())
+    assignments = infomap_with_options(graph, CommunityOptions())
+    set_communities: dict[int, set[int]] = {}
+    for node_id, community_id in assignments.items():
+        set_communities.setdefault(community_id, set()).add(node_id.value)
 
     ug = _to_networkx(graph).to_undirected()
-    quality = _modularity(ug, communities)
-    cross_edges = _find_cross_community_edges(graph, communities)
+    quality = _modularity(ug, set_communities)
+    cross_edges = _find_cross_community_edges(graph, set_communities)
 
     return {
         "algorithm": algorithm,
@@ -714,7 +717,7 @@ def detect_communities(
                     for nid in sorted(list(nodes))[:20]
                 ],
             }
-            for cid, nodes in sorted(communities.items())
+            for cid, nodes in sorted(set_communities.items())
         ],
         "cross_community_edges": cross_edges,
     }

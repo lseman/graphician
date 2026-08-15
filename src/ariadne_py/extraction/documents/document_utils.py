@@ -27,6 +27,10 @@ def resolve_symbol(graph, token: str) -> NodeId | None:
     if len(token) < 2:
         return None
 
+    exact = graph.find_by_qname(token)
+    if exact is not None:
+        return exact
+
     for nid, node in graph.nodes():
         if node.kind not in (
             NodeKind.FUNCTION,
@@ -105,7 +109,7 @@ def normalize_for_match(s: str) -> str:
             if prev.islower() or prev.isdigit() or (prev.isupper() and nxt and nxt.islower()):
                 result.append("_")
         result.append(c.lower())
-    return "".join(result)
+    return re.sub(r"[^a-z0-9]+", "", "".join(result))
 
 
 def slugify(s: str) -> str:

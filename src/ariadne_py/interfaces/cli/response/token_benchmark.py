@@ -169,7 +169,7 @@ def _check_embeddings(db_path: str) -> bool:
         True if embeddings exist.
     """
     try:
-        from ...persistence.store import GraphStore
+        from ....persistence.store import GraphStore
 
         store = GraphStore(db_path)
         try:
@@ -192,7 +192,7 @@ def _search_hits(graph, question: str) -> list[dict[str, Any]]:
         List of hit dicts with 'id' and 'score'.
     """
     try:
-        from ...analysis.search import hybrid_search
+        from ....analysis.search import hybrid_search
 
         result = hybrid_search(graph, question, limit=50)
         return result.get("results", [])

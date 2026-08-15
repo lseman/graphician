@@ -73,15 +73,15 @@ class EmbeddingIndex:
         texts = [node.source_text or "" for _, node in nodes_with_text]
         nids = [nid.value for nid, _ in nodes_with_text]
 
-        from sentence_transformers import SentenceTransformer
         if self._model is None:
+            from sentence_transformers import SentenceTransformer
             self._model = SentenceTransformer("all-MiniLM-L6-v2")
 
         embeddings = self._model.encode(texts, normalize_embeddings=True)
 
-        for nid, embedding in zip(nids, embeddings):
+        for nid, text, embedding in zip(nids, texts, embeddings, strict=True):
             self._embeddings[nid] = embedding.tolist()
-            self._texts[nid] = texts[nids.index(nid)]
+            self._texts[nid] = text
 
         logger.info("Indexed %d nodes for semantic search", len(nids))
 

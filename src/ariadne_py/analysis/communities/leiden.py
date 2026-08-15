@@ -30,7 +30,7 @@ from .core import (
     relabel,
 )
 from .numba_accel import _local_move_csr, build_csr_from_working, has_numba
-from .utils import _find_community, _to_networkx
+from .utils import _find_cross_community_edges, _modularity, _to_networkx
 
 
 def leiden(
@@ -91,11 +91,15 @@ def _run_multilevel_leiden(
 
         aggregation_partition = _refinement_phase(working, partition, options)
 
+        member_owner = {
+            nid: super_idx
+            for super_idx, members in enumerate(working.members)
+            for nid in members
+        }
         for nid in current:
-            for super_idx, members in enumerate(working.members):
-                if nid in members:
-                    current[nid] = aggregation_partition[super_idx]
-                    break
+            super_idx = member_owner.get(nid)
+            if super_idx is not None:
+                current[nid] = aggregation_partition[super_idx]
 
         if not moved:
             return current
@@ -344,9 +348,13 @@ def detect_communities(
     """
     communities = leiden_with_options(graph, CommunityOptions())
 
+    set_communities: dict[int, set[int]] = {}
+    for node_id, community_id in communities.items():
+        set_communities.setdefault(community_id, set()).add(node_id.value)
+
     ug = _to_networkx(graph).to_undirected()
-    quality = _modularity(ug, communities)
-    cross_edges = _find_cross_community_edges(graph, communities)
+    quality = _modularity(ug, set_communities)
+    cross_edges = _find_cross_community_edges(graph, set_communities)
 
     return {
         "algorithm": algorithm,
@@ -368,7 +376,7 @@ def detect_communities(
                     for nid in sorted(list(nodes))[:20]
                 ],
             }
-            for cid, nodes in sorted(communities.items())
+            for cid, nodes in sorted(set_communities.items())
         ],
         "cross_community_edges": cross_edges,
     }

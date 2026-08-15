@@ -69,9 +69,9 @@ def handle_context_pack(graph, params: dict[str, Any]) -> dict[str, Any]:
 
     nid = graph.find_by_qname(target) if hasattr(graph, "find_by_qname") else None
     if nid is None:
-        for _, node in graph.nodes():
+        for node_id, node in graph.nodes():
             if node.qualified_name == target or node.name == target:
-                nid = node.id if hasattr(node, "id") else id(node)
+                nid = node_id
                 break
 
     if nid is None:
@@ -132,9 +132,9 @@ def find_related_json(graph, target: str, line: int | None = None, limit: int = 
     """
     nid = graph.find_by_qname(target) if hasattr(graph, "find_by_qname") else None
     if nid is None:
-        for _, node in graph.nodes():
+        for node_id, node in graph.nodes():
             if node.qualified_name == target:
-                nid = node.id if hasattr(node, "id") else id(node)
+                nid = node_id
                 break
 
     if nid is None:
@@ -148,7 +148,7 @@ def find_related_json(graph, target: str, line: int | None = None, limit: int = 
             related.add(src)
 
     results = []
-    for rid in related[:limit]:
+    for rid in sorted(related, key=lambda item: item.value)[:limit]:
         node = graph.node(rid) if hasattr(graph, "node") else None
         if node is None:
             for _, n in graph.nodes():

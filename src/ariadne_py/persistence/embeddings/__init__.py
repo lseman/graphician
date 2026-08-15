@@ -6,14 +6,14 @@ ExternalEmbeddingConfig dataclass and validate_config function.
 
 from __future__ import annotations
 
-import json
 import os
-from dataclasses import dataclass, field
-from typing import Any
-
-import httpx
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from ...core.graph import Graph
+
+if TYPE_CHECKING:
+    import httpx
 
 
 @dataclass
@@ -83,6 +83,7 @@ def external_embedding_from_config(
     if text.strip().isspace() or not text.strip():
         return [0.0] * config.dimension
 
+    httpx = _require_httpx()
     with httpx.Client(timeout=30.0) as client:
         provider = config.provider.replace("-embedding", "")
         base = (config.base_url or _DEFAULT_BASE_URLS.get(provider, "http://localhost:11434")).rstrip("/")
@@ -157,7 +158,10 @@ def build_local_embeddings(
     vectors = SentenceTransformer(model).encode(
         list(texts.values()), normalize_embeddings=True
     )
-    return {qname: vector.tolist() for qname, vector in zip(texts, vectors)}
+    return {
+        qname: vector.tolist()
+        for qname, vector in zip(texts, vectors, strict=True)
+    }
 
 
 def build_external_embeddings(
@@ -170,6 +174,7 @@ def build_external_embeddings(
     batch_size: int = 64,
     timeout: float = 60.0,
 ) -> dict[str, list[float]]:
+    httpx = _require_httpx()
     if batch_size <= 0:
         raise ValueError("batch_size must be positive")
     items = list(embeddable_texts(graph).items())
@@ -187,7 +192,10 @@ def build_external_embeddings(
             )
             if len(vectors) != len(batch):
                 raise RuntimeError("embedding provider returned an unexpected vector count")
-            output.update((qname, vector) for (qname, _), vector in zip(batch, vectors))
+            output.update(
+                (qname, vector)
+                for (qname, _), vector in zip(batch, vectors, strict=True)
+            )
     return output
 
 
@@ -241,3 +249,14 @@ def _embed_batch(
             for item in response.json()["embeddings"]
         ]
     raise ValueError(f"unsupported embedding provider: {provider}")
+
+
+def _require_httpx() -> Any:
+    try:
+        import httpx
+    except ImportError as error:
+        raise RuntimeError(
+            "remote embeddings require the optional 'embeddings' dependencies; "
+            "install ariadne-py[embeddings]"
+        ) from error
+    return httpx

@@ -9,7 +9,8 @@ from ...core.edge import Edge, EdgeKind
 from ...core.graph import Graph
 from ...core.id import NodeId, EdgeId
 from ...core.node import Node, NodeKind
-from .normalize import normalize_label
+from .lsh import lsh_candidate_pairs
+from .normalize import normalize_label, passes_entropy_gate
 from .similarity import jaro_winkler
 
 
@@ -75,8 +76,8 @@ def deduplicate_nodes(
 
     # Build normalized names map
     normalized: dict[NodeId, str] = {}
-    for node in nodes:
-        normalized[node_ids[nodes.index(node)]] = normalize_label(node.name)
+    for node_id, node in zip(node_ids, nodes, strict=True):
+        normalized[node_id] = normalize_label(node.name)
 
     # Entropy gate: filter out low-entropy (likely noise) labels
     eligible_ids: set[NodeId] = set()

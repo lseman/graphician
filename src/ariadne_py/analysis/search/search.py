@@ -87,18 +87,31 @@ def task_aware_search(
     identifiers = _extract_query_identifiers(query)
 
     hits: list[SearchHit] = []
-    qn = _normalize_identifier(query)
-
     for nid, node in graph.nodes():
         score = 0.0
         reasons: list[str] = []
 
         # Name-based scoring
         if identifiers:
-            name_score = max(_fuzzy_score(qn, node.name) for id_ in identifiers)
+            normalized_name = _normalize_identifier(node.name)
+            normalized_qname = _normalize_identifier(node.qualified_name)
+            name_score = max(
+                max(
+                    _fuzzy_score(identifier, normalized_name),
+                    0.85 if identifier in normalized_qname else 0.0,
+                )
+                for identifier in identifiers
+            )
             if name_score > 0:
                 score += name_score * 2.0
                 reasons.append("name_match")
+
+        # Synthetic placeholders and local variables are useful as graph
+        # plumbing but should not outrank source-backed definitions.
+        if node.source_uri is None:
+            score *= 0.35
+        if node.kind is NodeKind.VARIABLE:
+            score *= 0.5
 
         # Intent-based boosting
         if intent == SearchIntent.IMPACT:
@@ -123,10 +136,40 @@ def task_aware_search(
 def hybrid_search(
     graph: Graph,
     query: str,
+    intent: SearchIntent | str | None = None,
     limit: int = 20,
-) -> list[SearchHit]:
-    """Legacy API — same as task_aware_search."""
-    return task_aware_search(graph, query, limit=limit)
+) -> dict[str, Any]:
+    """Compatibility search API used by the CLI, MCP, and context packs.
+
+    The typed search functions return ``SearchHit`` objects.  This public
+    boundary intentionally returns JSON-ready data because all of its callers
+    expose or further compose a structured response.
+    """
+    if isinstance(intent, str):
+        try:
+            intent = SearchIntent(intent.lower())
+        except ValueError:
+            intent = None
+    resolved_intent = intent or SearchIntent.classify(query)
+    hits = task_aware_search(graph, query, limit=limit, intent=resolved_intent)
+    return {
+        "query": query,
+        "intent": resolved_intent.value,
+        "results": [
+            {
+                "id": hit.id.value,
+                "qualified_name": hit.node.qualified_name,
+                "name": hit.node.name,
+                "kind": hit.node.kind.value,
+                "source_uri": hit.node.source_uri,
+                "line_start": hit.node.line_start,
+                "line_end": hit.node.line_end,
+                "score": round(hit.score, 6),
+                "reasons": hit.reasons,
+            }
+            for hit in hits
+        ],
+    }
 
 
 def token_overlap_search(

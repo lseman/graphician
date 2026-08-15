@@ -83,12 +83,15 @@ def _run_multilevel_louvain(
         dense = densify(partition)
         moved = len(set(dense)) < working.len()
 
+        member_owner = {
+            nid: super_idx
+            for super_idx, members in enumerate(working.members)
+            for nid in members
+        }
         for nid in current:
-            # Find current super-node index for this original node
-            for super_idx, members in enumerate(working.members):
-                if nid in members:
-                    current[nid] = dense[super_idx]
-                    break
+            super_idx = member_owner.get(nid)
+            if super_idx is not None:
+                current[nid] = dense[super_idx]
 
         if not moved:
             return current

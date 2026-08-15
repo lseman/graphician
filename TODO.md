@@ -135,16 +135,16 @@ extraction/
 └── type_resolution.py   # Flat (will move to pipeline/)
 ```
 
-## Next Steps
+## Operational Parity
 
-1. Move `extraction/call_resolution.py` → `extraction/pipeline/call_resolution.py`
-2. Move `extraction/type_resolution.py` → `extraction/pipeline/type_resolution.py`
-3. Create `extraction/pipeline/pipeline.py` (stub or merge with `pipeline.py`)
-4. Create `extraction/pipeline/exclusions.py` (stub)
-5. Create `extraction/pipeline/suppress_list.py` (stub)
-6. Move `extraction/documents/svg.py` → `extraction/documents/vision/svg.py`
-7. Update all imports in `extraction/__init__.py` and dependent files
-8. Run full test suite to verify no regressions
+- ✅ Rust and Python read and write the same canonical Rust SQLite schema. Opening the
+  retired Python-only layout destructively resets it and marks it for a rebuild.
+- ✅ Rust's grouped CLI forms (`analysis`, `git`, `structure`, `advanced`, `agent`,
+  `maintenance`, and `utility`) are accepted alongside Python's flat aliases.
+- ✅ `eval`, `jedi-enrich`, and `spring-di-resolve` are exposed from the Python CLI.
+- ✅ The seven Rust evaluation benchmarks and CSV/JSON result formats are available.
+- ✅ Graph self-loops and parallel edges use Rust/petgraph semantics, allowing lossless
+  Rust-to-Python database loading.
 
 ## Rust Reference Gaps
 

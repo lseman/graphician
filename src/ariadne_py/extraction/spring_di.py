@@ -21,12 +21,11 @@ or multiple surviving candidates) are skipped, not guessed.
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any
 
-from ...core.edge import Confidence, Edge, EdgeKind
-from ...core.graph import Graph
-from ...core.id import NodeId
-from ...core.node import Node, NodeKind
+from ..core.edge import Confidence, Edge, EdgeKind
+from ..core.graph import Graph
+from ..core.id import NodeId
+from ..core.node import Node, NodeKind
 
 STEREOTYPE_ANNOTATIONS: tuple[str, ...] = (
     "Component",

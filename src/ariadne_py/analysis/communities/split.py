@@ -102,9 +102,9 @@ def _build_subgraph(graph: Graph, member_ids: list[NodeId]) -> Graph:
 
     # Add edges between members
     for nid in member_ids:
-        for src, dst, edge in graph.outgoing(nid):
+        for dst, edge in graph.out_neighbors(nid):
             if dst.value in member_set:
-                if src in node_map and dst in node_map:
-                    sub_graph.add_edge(node_map[src], node_map[dst], edge)
+                if nid in node_map and dst in node_map:
+                    sub_graph.add_edge(node_map[nid], node_map[dst], edge)
 
     return sub_graph

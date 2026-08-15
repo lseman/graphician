@@ -218,27 +218,20 @@ def counterfactual_json(
             dropped_edge_ids.add(edge_id)
 
     # BFS from target with all edges
-    def _reach(all_edges: set) -> set:
+    def _reach(all_edges: list[tuple]) -> set:
+        adjacency: dict[Any, list[Any]] = {}
+        for _edge_id, src, dst, _edge in all_edges:
+            if direction in ("out", "both"):
+                adjacency.setdefault(src, []).append(dst)
+            if direction in ("in", "both"):
+                adjacency.setdefault(dst, []).append(src)
         seen: set = {target_id}
         queue = deque([(target_id, 0)])
         while queue:
             node_id, depth = queue.popleft()
             if depth >= max_depth:
                 continue
-            neighbors = []
-            if direction == "in":
-                for nid, _, dst, _ in all_edges:
-                    if dst == node_id:
-                        neighbors.append(nid)
-            elif direction == "out":
-                for nid, src, _, _ in all_edges:
-                    if src == node_id:
-                        neighbors.append(nid)
-            else:  # both
-                for nid, src, dst, _ in all_edges:
-                    if src == node_id or dst == node_id:
-                        neighbors.append(nid)
-            for n in neighbors:
+            for n in adjacency.get(node_id, ()):
                 if n not in seen:
                     seen.add(n)
                     queue.append((n, depth + 1))
@@ -246,11 +239,11 @@ def counterfactual_json(
 
     # All edges
     all_edges = list(graph.edges())
-    before = _reach(set(all_edges))
+    before = _reach(all_edges)
 
     # Without dropped edges
-    remaining = set(e for e in all_edges if e[0] not in dropped_edge_ids)
-    after = _reach(set(remaining))
+    remaining = [edge for edge in all_edges if edge[0] not in dropped_edge_ids]
+    after = _reach(remaining)
 
     lost = sorted(before - after, key=lambda x: str(x))
 
@@ -360,9 +353,9 @@ def _resolve(graph, target: str) -> Any:
         pass
 
     # Try substring match
-    for _, node in graph.nodes():
+    for node_id, node in graph.nodes():
         if node.qualified_name == target or node.name == target:
-            return node.id if hasattr(node, "id") else None
+            return node_id
 
     return None
 

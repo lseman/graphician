@@ -141,7 +141,9 @@ def _emit_calls_in_tree(node: ts.Node, graph: Graph, caller_id: NodeId, source: 
 
 def _walk(node: ts.Node, source: str, graph: Graph, file_qn: str, parent_id: NodeId, parent_is_class: bool, parent_is_method: bool) -> None:
     for child in _children(node):
-        if child.type == "function_declaration":
+        if child.type == "export_statement":
+            _walk(child, source, graph, file_qn, parent_id, parent_is_class, parent_is_method)
+        elif child.type == "function_declaration":
             name_node = _child_by_field(child, "name")
             if not name_node:
                 continue
@@ -214,6 +216,14 @@ def _walk(node: ts.Node, source: str, graph: Graph, file_qn: str, parent_id: Nod
 
             # Extends
             superclass = _child_by_field(child, "superclass")
+            if superclass is None:
+                heritage = next(
+                    (item for item in _children(child) if item.type == "class_heritage"),
+                    None,
+                )
+                if heritage is not None:
+                    named = _children(heritage)
+                    superclass = named[-1] if named else None
             if superclass:
                 super_name = _text(superclass, source)
                 super_qn = f"type::{super_name}"
@@ -231,6 +241,14 @@ def _walk(node: ts.Node, source: str, graph: Graph, file_qn: str, parent_id: Nod
             class_id = _add_node(graph, NodeKind.CLASS, qn, Path(""), child.start_point.row, child.end_point.row, source)
             graph.add_edge(parent_id, class_id, Edge.extracted(EdgeKind.DEFINES))
             superclass = _child_by_field(child, "superclass")
+            if superclass is None:
+                heritage = next(
+                    (item for item in _children(child) if item.type == "class_heritage"),
+                    None,
+                )
+                if heritage is not None:
+                    named = _children(heritage)
+                    superclass = named[-1] if named else None
             if superclass:
                 super_qn = f"type::{_text(superclass, source)}"
                 _add_node(graph, NodeKind.CLASS, super_qn, Path(""), 0, 0)
@@ -239,15 +257,44 @@ def _walk(node: ts.Node, source: str, graph: Graph, file_qn: str, parent_id: Nod
             if body:
                 _walk(body, source, graph, file_qn, class_id, True, False)
 
-        elif child.type == "import_declaration":
+        elif child.type == "lexical_declaration":
+            for declaration in _children(child):
+                if declaration.type != "variable_declarator":
+                    continue
+                name_node = _child_by_field(declaration, "name")
+                value_node = _child_by_field(declaration, "value")
+                if (
+                    name_node is None
+                    or value_node is None
+                    or value_node.type not in {"arrow_function", "function_expression"}
+                ):
+                    continue
+                name = _text(name_node, source)
+                fn_id = _add_node(
+                    graph,
+                    NodeKind.METHOD if parent_is_class else NodeKind.FUNCTION,
+                    f"{file_qn}::{name}",
+                    Path(""),
+                    value_node.start_point.row,
+                    value_node.end_point.row,
+                    _text(value_node, source),
+                )
+                graph.add_edge(parent_id, fn_id, Edge.extracted(EdgeKind.DEFINES))
+                body = _child_by_field(value_node, "body")
+                if body:
+                    _emit_calls_in_tree(body, graph, fn_id, source)
+
+        elif child.type == "import_statement":
             source_node = _child_by_field(child, "source")
+            if source_node is None:
+                source_node = next((c for c in _children(child) if c.type == "string"), None)
             if source_node:
                 src_text = _text(source_node, source).strip().strip('"').strip("'")
                 mod_qn = f"module::{src_text}"
                 mod_id = _add_node(graph, NodeKind.MODULE, mod_qn, Path(""), 0, 0)
                 graph.add_edge(parent_id, mod_id, Edge.extracted(EdgeKind.IMPORTS))
 
-        elif child.type == "export":
+        elif child.type == "export_statement":
             source_node = _child_by_field(child, "source")
             if source_node:
                 src_text = _text(source_node, source).strip().strip('"').strip("'")

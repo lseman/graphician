@@ -133,7 +133,9 @@ def _walk_body(
                 mod_id = _add_node(graph, NodeKind.MODULE, mod_qn, Path(""), 0, 0)
                 graph.add_edge(parent_id, mod_id, Edge.extracted(EdgeKind.IMPORTS))
         elif child.type == "import_declaration":
-            name_node = child.child_by_field_name("name")
+            name_node = child.child_by_field_name("name") or child.child_by_field_name("path")
+            if name_node is None:
+                name_node = next(iter(child.named_children), None)
             if name_node:
                 import_path = _text(name_node)
                 # Handle static imports

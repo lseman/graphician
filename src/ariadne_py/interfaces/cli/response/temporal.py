@@ -11,7 +11,9 @@ Provides:
 from __future__ import annotations
 
 import logging
+import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 from ....core.edge import EdgeKind
@@ -240,6 +242,7 @@ def graph_diff_json(
     base: str,
     head: str = "HEAD",
     top: int = 50,
+    repo_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """Graph diff between two commits via temporal validity.
 
@@ -275,15 +278,14 @@ def graph_diff_json(
             ),
         }
 
-    # Build an is_ancestor callback using git
-    try:
-        from ....persistence.store import GitHelper
-        git = GitHelper()
-        def is_ancestor_fn(a: str, b: str) -> bool:
-            return git.is_ancestor(a, b)
-    except Exception:
-        # No git helper available — assume nothing is ancestor
-        is_ancestor_fn = lambda a, b: False
+    def is_ancestor_fn(ancestor: str, descendant: str) -> bool:
+        process = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+        )
+        return process.returncode == 0
 
     diff = temporal_diff(graph, base, head, is_ancestor_fn)
 

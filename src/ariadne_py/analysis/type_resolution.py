@@ -17,8 +17,9 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-from ..core.edge import EdgeKind
+from ..core.edge import Edge, EdgeKind
 from ..core.graph import Graph
+from ..core.id import EdgeId, NodeId
 from ..core.node import NodeKind
 
 
@@ -37,7 +38,7 @@ def resolve_type_placeholders(graph: Graph) -> int:
             placeholders.append((nid.value, name))
 
     rewired = 0
-    edges_to_remove: list[tuple[int, int, int]] = []
+    edges_to_remove: list[EdgeId] = []
     edges_to_add: list[tuple[int, int, EdgeKind]] = []
 
     for placeholder_id, name in placeholders:
@@ -50,27 +51,25 @@ def resolve_type_placeholders(graph: Graph) -> int:
             continue
 
         # Find edges pointing at this placeholder
-        for src_id, dst_id, edge in iter_edges(graph):
+        for edge_id, src_id, dst_id, edge in iter_edges(graph):
             if dst_id != placeholder_id:
                 continue
             if edge.kind not in (EdgeKind.INHERITS, EdgeKind.IMPLEMENTS):
                 continue
 
-            edges_to_remove.append((src_id, dst_id, edge.kind))
+            edges_to_remove.append(edge_id)
             edges_to_add.append((src_id, real_id, edge.kind))
 
     # Apply edge changes
     for src_id, dst_id, kind in edges_to_add:
         graph.add_edge(
-            src_id,
-            dst_id,
-            EdgeKind=kind,
-            confidence="extracted",
+            NodeId(src_id),
+            NodeId(dst_id),
+            Edge.extracted(kind),
         )
         rewired += 1
 
-    for src_id, dst_id, kind in edges_to_remove:
-        graph.remove_edge(src_id, dst_id)
+    graph.remove_edges_by_id(edges_to_remove)
 
     # Drop orphaned placeholders
     orphaned = [
@@ -79,7 +78,7 @@ def resolve_type_placeholders(graph: Graph) -> int:
         if has_no_edges(graph, placeholder_id)
     ]
     for nid in orphaned:
-        graph.remove_node(nid)
+        graph.remove_node(NodeId(nid))
 
     return rewired
 
@@ -97,9 +96,9 @@ def build_real_type_by_name(graph: Graph) -> dict[str, list[int]]:
 def has_no_edges(graph: Graph, node_id: int) -> bool:
     """Check if a node has no incoming or outgoing edges."""
     try:
-        for _ in graph.in_neighbors(type("Obj", (), {"value": node_id})()):
+        for _ in graph.in_neighbors(NodeId(node_id)):
             return False
-        for _ in graph.out_neighbors(type("Obj", (), {"value": node_id})()):
+        for _ in graph.out_neighbors(NodeId(node_id)):
             return False
     except Exception:
         pass
@@ -109,7 +108,7 @@ def has_no_edges(graph: Graph, node_id: int) -> bool:
 def iter_edges(graph: Graph):
     """Iterate over all edges as (src_id, dst_id, edge)."""
     try:
-        for _, src, dst, edge in graph.edges():
-            yield src.value, dst.value, edge
+        for edge_id, src, dst, edge in graph.edges():
+            yield edge_id, src.value, dst.value, edge
     except Exception:
         yield from []

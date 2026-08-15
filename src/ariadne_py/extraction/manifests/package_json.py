@@ -133,12 +133,21 @@ def _extract_dependencies(
     dep_type: str,
 ) -> None:
     """Extract dependency nodes and edges."""
-    pkg_name = Path(source_uri).stem
+    package_entry = next(
+        (
+            (node_id, node)
+            for node_id, node in graph.nodes()
+            if node.kind is NodeKind.PACKAGE
+            and node.source_uri == source_uri
+            and "type" not in node.properties
+        ),
+        None,
+    )
     for dep_name, dep_version in deps.items():
         dep_qn = f"package::{dep_name}"
 
         dep_node = Node(
-            kind=NodeKind.DEPENDENCY,
+            kind=NodeKind.PACKAGE,
             name=dep_name,
             qualified_name=dep_qn,
             source_uri=source_uri,
@@ -150,8 +159,7 @@ def _extract_dependencies(
         graph.add_node(dep_node)
 
         # Link to package
-        pkg_qn = f"package::{pkg_name}"
-        pkg_id = graph.find_by_qname(pkg_qn)
+        pkg_id = package_entry[0] if package_entry is not None else None
         dep_id = graph.find_by_qname(dep_qn)
         if pkg_id and dep_id:
             graph.add_edge(pkg_id, dep_id, Edge.extracted(EdgeKind.DEPENDS_ON))
@@ -168,7 +176,7 @@ def _extract_script(
     script_qn = f"package::{pkg_name}::script::{script_name}"
 
     script_node = Node(
-        kind=NodeKind.SCRIPT,
+        kind=NodeKind.FUNCTION,
         name=script_name,
         qualified_name=script_qn,
         source_uri=source_uri,
@@ -181,7 +189,7 @@ def _extract_script(
     pkg_id = graph.find_by_qname(pkg_qn)
     script_id = graph.find_by_qname(script_qn)
     if pkg_id and script_id:
-        graph.add_edge(pkg_id, script_id, Edge.extracted(EdgeKind.PROPERTY))
+        graph.add_edge(pkg_id, script_id, Edge.extracted(EdgeKind.DEFINES))
 
 
 def _extract_engine(
@@ -195,7 +203,7 @@ def _extract_engine(
     engine_qn = f"package::{pkg_name}::engine::{engine_name}"
 
     engine_node = Node(
-        kind=NodeKind.ENGINE,
+        kind=NodeKind.VARIABLE,
         name=engine_name,
         qualified_name=engine_qn,
         source_uri=source_uri,
@@ -208,7 +216,7 @@ def _extract_engine(
     pkg_id = graph.find_by_qname(pkg_qn)
     engine_id = graph.find_by_qname(engine_qn)
     if pkg_id and engine_id:
-        graph.add_edge(pkg_id, engine_id, Edge.extracted(EdgeKind.PROPERTY))
+        graph.add_edge(pkg_id, engine_id, Edge.extracted(EdgeKind.DEFINES))
 
 
 def _extract_config(
@@ -222,7 +230,7 @@ def _extract_config(
     config_qn = f"package::{pkg_name}::config::{config_key}"
 
     config_node = Node(
-        kind=NodeKind.CONFIG,
+        kind=NodeKind.VARIABLE,
         name=config_key,
         qualified_name=config_qn,
         source_uri=source_uri,
@@ -235,7 +243,7 @@ def _extract_config(
     pkg_id = graph.find_by_qname(pkg_qn)
     config_id = graph.find_by_qname(config_qn)
     if pkg_id and config_id:
-        graph.add_edge(pkg_id, config_id, Edge.extracted(EdgeKind.PROPERTY))
+        graph.add_edge(pkg_id, config_id, Edge.extracted(EdgeKind.DEFINES))
 
 
 def _extract_workspace(
@@ -260,4 +268,4 @@ def _extract_workspace(
     pkg_id = graph.find_by_qname(pkg_qn)
     workspace_id = graph.find_by_qname(workspace_qn)
     if pkg_id and workspace_id:
-        graph.add_edge(pkg_id, workspace_id, Edge.extracted(EdgeKind.CONTAINS))
+        graph.add_edge(pkg_id, workspace_id, Edge.extracted(EdgeKind.DEFINES))

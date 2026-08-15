@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ....core.edge import EdgeKind
+from ....core.edge import Confidence, EdgeKind
 
 
 def bridge_nodes_json(graph, limit: int = 25) -> dict[str, Any]:
@@ -20,7 +20,7 @@ def bridge_nodes_json(graph, limit: int = 25) -> dict[str, Any]:
     Returns:
         Bridge nodes with scores.
     """
-    # Detect communities via connected components
+    # Detect communities via Leiden.
     communities = _detect_communities(graph)
 
     # Find nodes connecting multiple communities
@@ -30,8 +30,10 @@ def bridge_nodes_json(graph, limit: int = 25) -> dict[str, Any]:
         comm_b = communities.get(dst)
         if comm_a is not None:
             node_comms.setdefault(src, set()).add(comm_a)
+            node_comms.setdefault(dst, set()).add(comm_a)
         if comm_b is not None:
             node_comms.setdefault(dst, set()).add(comm_b)
+            node_comms.setdefault(src, set()).add(comm_b)
 
     bridges = []
     for nid, comms in node_comms.items():
@@ -69,11 +71,31 @@ def cycles_json(graph, limit: int = 25) -> dict[str, Any]:
     Returns:
         Cycles with member nodes.
     """
-    cycles = _find_cycles(graph, limit * 2)
+    from ....analysis.structure import cyclic_components
+
+    components = sorted(cyclic_components(graph), key=lambda item: -len(item.nodes))
+    cycles = []
+    for component in components[:limit]:
+        nodes = [
+            graph.node(node_id)
+            for node_id in component.nodes
+            if graph.node(node_id) is not None
+        ]
+        cycles.append({
+            "size": len(nodes),
+            "nodes": [
+                {
+                    "qualified_name": node.qualified_name,
+                    "kind": node.kind.value,
+                    "source_uri": node.source_uri,
+                }
+                for node in nodes
+            ],
+        })
     return {
         "operation": "cycles",
-        "hits": cycles[:limit],
-        "total": len(cycles),
+        "hits": cycles,
+        "total": len(components),
     }
 
 
@@ -87,24 +109,19 @@ def core_json(graph, limit: int = 25) -> dict[str, Any]:
     Returns:
         Core nodes with degree info.
     """
-    degrees: dict[int, int] = {}
-    for _, src, dst, _ in graph.edges():
-        degrees[src] = degrees.get(src, 0) + 1
-        degrees[dst] = degrees.get(dst, 0) + 1
+    from ....analysis.structure import core_numbers
 
     core_nodes = []
-    for nid, degree in sorted(degrees.items(), key=lambda x: -x[1])[:limit]:
-        node = graph.node(nid) if hasattr(graph, "node") else None
-        if node is None:
-            for _, n in graph.nodes():
-                if _ids_match(n, nid):
-                    node = n
-                    break
+    ranked = sorted(core_numbers(graph).items(), key=lambda item: -item[1])
+    for nid, coreness in ranked[:limit]:
+        node = graph.node(nid)
         if node:
             core_nodes.append({
-                "score": degree,
+                "core": coreness,
+                "degree": sum(1 for _ in graph.in_neighbors(nid))
+                + sum(1 for _ in graph.out_neighbors(nid)),
                 "qualified_name": node.qualified_name,
-                "kind": str(node.kind),
+                "kind": node.kind.value,
                 "source_uri": node.source_uri,
             })
 
@@ -125,32 +142,25 @@ def articulation_json(graph, limit: int = 25) -> dict[str, Any]:
     Returns:
         Articulation points with info.
     """
-    # Simple heuristic: nodes with high betweenness-like score
-    node_impact: dict[int, int] = {}
-    for _, src, dst, _ in graph.edges():
-        node_impact[src] = node_impact.get(src, 0) + 1
-        node_impact[dst] = node_impact.get(dst, 0) + 1
+    from ....analysis.structure import find_articulation_points
 
+    raw = find_articulation_points(graph)
     points = []
-    for nid, impact in sorted(node_impact.items(), key=lambda x: -x[1])[:limit]:
-        node = graph.node(nid) if hasattr(graph, "node") else None
-        if node is None:
-            for _, n in graph.nodes():
-                if _ids_match(n, nid):
-                    node = n
-                    break
-        if node:
-            points.append({
-                "score": impact,
-                "qualified_name": node.qualified_name,
-                "kind": str(node.kind),
-                "source_uri": node.source_uri,
-            })
+    for item in raw["articulation_points"]:
+        node_id = graph.find_by_qname(item["qualified_name"])
+        if node_id is None:
+            continue
+        points.append({
+            **item,
+            "degree": sum(1 for _ in graph.in_neighbors(node_id))
+            + sum(1 for _ in graph.out_neighbors(node_id)),
+        })
+    points.sort(key=lambda item: -item["degree"])
 
     return {
         "operation": "articulation_points",
-        "hits": points,
-        "total": len(points),
+        "hits": points[:limit],
+        "total": raw["total"],
     }
 
 
@@ -170,8 +180,7 @@ def gaps_json(graph, limit: int = 25) -> dict[str, Any]:
         connected.add(dst)
 
     disconnected = []
-    for _, node in graph.nodes():
-        nid = node.id if hasattr(node, "id") else id(node)
+    for nid, node in graph.nodes():
         if nid not in connected:
             disconnected.append({
                 "qualified_name": node.qualified_name,
@@ -289,11 +298,15 @@ def diagnostics_json(db_path: str, limit: int = 25) -> dict[str, Any]:
     Returns:
         Health diagnostics with warnings and metrics.
     """
-    from ...persistence.store import GraphStore
+    from ....persistence.store import GraphStore
+    from .impact import hub_nodes_json
 
     store = GraphStore(db_path)
     try:
         graph = store.load_graph()
+        from ....analysis.structure import call_resolution_stats
+
+        calls = call_resolution_stats(graph)
         warnings: list[dict[str, Any]] = []
         health = "healthy"
 
@@ -336,32 +349,20 @@ def diagnostics_json(db_path: str, limit: int = 25) -> dict[str, Any]:
                 "extracted": sum(
                     1
                     for _, _, _, e in graph.edges()
-                    if e.confidence > 0.8
+                    if e.confidence is Confidence.EXTRACTED
                 ),
                 "inferred": sum(
                     1
                     for _, _, _, e in graph.edges()
-                    if 0.3 < e.confidence <= 0.8
+                    if e.confidence is Confidence.INFERRED
                 ),
                 "ambiguous": sum(
                     1
                     for _, _, _, e in graph.edges()
-                    if e.confidence <= 0.3
+                    if e.confidence is Confidence.AMBIGUOUS
                 ),
             },
-            "call_resolution": {
-                "resolved": sum(
-                    1
-                    for _, _, _, e in graph.edges()
-                    if e.kind == EdgeKind.CALLS and e.confidence > 0.9
-                ),
-                "unresolved": sum(
-                    1
-                    for _, _, _, e in graph.edges()
-                    if e.kind == EdgeKind.CALLS and e.confidence <= 0.9
-                ),
-                "rate": 0.0,
-            },
+            "call_resolution": calls,
         }
     finally:
         store.close()
@@ -370,47 +371,24 @@ def diagnostics_json(db_path: str, limit: int = 25) -> dict[str, Any]:
 # ── Helpers ────────────────────────────────────────────────────────
 
 
-def _detect_communities(graph) -> dict[int, int]:
-    """Detect communities via connected components."""
-    # Build adjacency
-    adj: dict[int, set] = {}
-    for _, src, dst, _ in graph.edges():
-        adj.setdefault(src, set()).add(dst)
-        adj.setdefault(dst, set()).add(src)
+def _detect_communities(graph) -> dict[Any, int]:
+    """Detect well-connected communities with Leiden."""
+    from ....analysis.communities.core import CommunityOptions
+    from ....analysis.communities.leiden import leiden_with_options
 
-    # BFS-based component detection
-    visited: set[int] = set()
-    component_id = 0
-    communities: dict[int, int] = {}
-
-    for _, node in graph.nodes():
-        nid = node.id if hasattr(node, "id") else id(node)
-        if nid not in visited:
-            # BFS
-            queue = [nid]
-            visited.add(nid)
-            while queue:
-                current = queue.pop(0)
-                communities[current] = component_id
-                for neighbor in adj.get(current, set()):
-                    if neighbor not in visited:
-                        visited.add(neighbor)
-                        queue.append(neighbor)
-            component_id += 1
-
-    return communities
+    return leiden_with_options(graph, CommunityOptions())
 
 
 def _find_cycles(graph, limit: int = 100) -> list[dict[str, Any]]:
     """Find simple cycles using DFS."""
-    adj: dict[int, set] = {}
+    adj: dict[Any, set] = {}
     for _, src, dst, _ in graph.edges():
         adj.setdefault(src, set()).add(dst)
 
     cycles: list[dict[str, Any]] = []
-    visited: set[int] = set()
+    visited: set[Any] = set()
 
-    def _dfs(node: int, path: list[int]) -> None:
+    def _dfs(node: Any, path: list[Any]) -> None:
         if len(cycles) >= limit:
             return
         for neighbor in adj.get(node, set()):
@@ -436,8 +414,7 @@ def _find_cycles(graph, limit: int = 100) -> list[dict[str, Any]]:
                 visited.add(neighbor)
                 _dfs(neighbor, path + [neighbor])
 
-    for _, node in graph.nodes():
-        nid = node.id if hasattr(node, "id") else id(node)
+    for nid, _node in graph.nodes():
         if nid not in visited:
             visited.add(nid)
             _dfs(nid, [nid])
@@ -449,14 +426,13 @@ def _find_cycles(graph, limit: int = 100) -> list[dict[str, Any]]:
 
 def _find_dead_code(graph, limit: int = 100) -> list[dict[str, Any]]:
     """Find nodes with no incoming or outgoing edges."""
-    connected: set[int] = set()
+    connected: set[Any] = set()
     for _, src, dst, _ in graph.edges():
         connected.add(src)
         connected.add(dst)
 
     dead = []
-    for _, node in graph.nodes():
-        nid = node.id if hasattr(node, "id") else id(node)
+    for nid, node in graph.nodes():
         if nid not in connected and node.kind not in ("file",):
             dead.append({
                 "qualified_name": node.qualified_name,

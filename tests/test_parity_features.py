@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import json
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -19,9 +21,46 @@ from ariadne_py.extraction.languages import LanguageRegistry
 from ariadne_py.extraction.pipeline import ExtractionPipeline
 from ariadne_py.extraction.rust_analyzer import _file_uri_to_path, _read_message
 from ariadne_py.interfaces.cli.git import collect_file_hashes, graph_freshness
-from ariadne_py.persistence.store import GraphStore
+from ariadne_py.interfaces.cli.response import tool_response
+from ariadne_py.persistence.store import GraphStore, IncompatibleDatabaseError
 from ariadne_py.analysis.diff import graph_diff
 from ariadne_py.interfaces.transport.mcp import AriadneMCP
+
+
+def test_tool_status_reports_call_resolution(tmp_path: Path) -> None:
+    graph = Graph()
+    caller = graph.add_node(Node.new(NodeKind.FUNCTION, "pkg::caller"))
+    callee = graph.add_node(Node.new(NodeKind.FUNCTION, "pkg::callee"))
+    graph.add_edge(caller, callee, Edge.extracted(EdgeKind.CALLS))
+    db_path = tmp_path / "graph.db"
+    with GraphStore(db_path) as store:
+        store.save_graph(graph)
+
+    response = tool_response(str(db_path), "status", {})
+
+    assert response["call_resolution"] == {
+        "resolved": 1,
+        "unresolved": 0,
+        "rate": 1.0,
+    }
+
+
+def test_tool_response_accepts_operations_without_hints(tmp_path: Path) -> None:
+    graph = Graph()
+    first = Node.new(NodeKind.FUNCTION, "pkg::first").with_source("pkg/a.py", 1, 2)
+    second = Node.new(NodeKind.FUNCTION, "pkg::second").with_source("pkg/b.py", 1, 2)
+    first_id = graph.add_node(first)
+    second_id = graph.add_node(second)
+    graph.add_edge(first_id, second_id, Edge.extracted(EdgeKind.CALLS))
+    db_path = tmp_path / "graph.db"
+    with GraphStore(db_path) as store:
+        store.save_graph(graph)
+
+    response = tool_response(str(db_path), "architecture", {})
+
+    assert response["operation"] == "architecture_overview"
+    assert response["community_count"] == 2
+    assert "_hints" not in response
 
 
 def test_compiler_evidence_adds_and_upgrades_edges_with_provenance() -> None:
@@ -113,6 +152,31 @@ def test_graph_freshness_is_unknown_for_legacy_database(tmp_path: Path) -> None:
         assert graph_freshness(store)["state"] == "unknown"
 
 
+def test_store_uses_canonical_schema_marker(tmp_path: Path) -> None:
+    with GraphStore(tmp_path / "graph.db") as store:
+        assert store.get_metadata("schema_version") == "2"
+        assert store.get_metadata("implementation") is None
+
+
+def test_store_rejects_rust_database_layout_without_mutating_it(tmp_path: Path) -> None:
+    db_path = tmp_path / "rust.db"
+    with closing(sqlite3.connect(db_path)) as connection:
+        with connection:
+            connection.execute("CREATE TABLE nodes (id INTEGER PRIMARY KEY, name TEXT)")
+
+    with pytest.raises(IncompatibleDatabaseError, match="canonical Rust Ariadne schema"):
+        GraphStore(db_path)
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+    assert tables == {"nodes"}
+
+
 def test_lsp_framing_and_file_uri_round_trip(tmp_path: Path) -> None:
     payload = json.dumps({"jsonrpc": "2.0", "id": 1, "result": []}).encode()
     message = io.BytesIO(f"Content-Length: {len(payload)}\r\n\r\n".encode() + payload)
@@ -141,6 +205,39 @@ def test_pipeline_integrates_ignores_documents_manifests_and_data_flow(tmp_path:
     assert graph.find_by_qname("package::demo") is not None
     assert any(edge.kind is EdgeKind.DATA_FLOW for _, _, _, edge in graph.edges())
     assert any(edge.kind is EdgeKind.TESTED_BY for _, _, _, edge in graph.edges())
+
+
+def test_parallel_pipeline_matches_sequential_pipeline(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("def first():\n    second()\n")
+    (tmp_path / "b.py").write_text("def second():\n    return 2\n")
+    (tmp_path / "README.md").write_text("# API\nUse `first` and `second`.\n")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "parallel-demo"\ndependencies = ["httpx>=0.27"]\n'
+    )
+
+    sequential_pipeline = ExtractionPipeline(LanguageRegistry(), workers=1)
+    parallel_pipeline = ExtractionPipeline(LanguageRegistry(), workers=4)
+    sequential = sequential_pipeline.build(tmp_path)
+    parallel = parallel_pipeline.build(tmp_path)
+
+    def signature(graph: Graph) -> tuple[set[tuple], set[tuple]]:
+        nodes = {
+            (node.qualified_name, node.kind.value, node.source_uri)
+            for _, node in graph.nodes()
+        }
+        edges = {
+            (
+                graph.node(source).qualified_name,
+                graph.node(target).qualified_name,
+                edge.kind.value,
+                edge.confidence.value,
+            )
+            for _, source, target, edge in graph.edges()
+        }
+        return nodes, edges
+
+    assert signature(parallel) == signature(sequential)
+    assert parallel_pipeline._file_hashes == sequential_pipeline._file_hashes
 
 
 def test_incremental_update_replaces_changed_file_and_preserves_other_file(tmp_path: Path) -> None:
@@ -190,20 +287,20 @@ def test_incremental_save_preserves_stable_rows_and_updates_indexes(tmp_path: Pa
         store.save_graph(initial)
         store.rebuild_embeddings()
         before = store._conn.execute(
-            """SELECT n.node_id, e.edge_id, v.vector
+            """SELECT n.id AS node_db_id, e.id AS edge_db_id, v.vector
                FROM nodes n
-               JOIN edges e ON e.source_id=n.node_id
-               JOIN embeddings v ON v.node_id=n.node_id
+               JOIN edges e ON e.src_id=n.id
+               JOIN embeddings v ON v.node_id=n.id
                WHERE n.qualified_name='pkg::a'"""
         ).fetchone()
         assert before is not None
 
         store.save_graph_incremental(initial)
         unchanged = store._conn.execute(
-            """SELECT n.node_id, e.edge_id, v.vector
+            """SELECT n.id AS node_db_id, e.id AS edge_db_id, v.vector
                FROM nodes n
-               JOIN edges e ON e.source_id=n.node_id
-               JOIN embeddings v ON v.node_id=n.node_id
+               JOIN edges e ON e.src_id=n.id
+               JOIN embeddings v ON v.node_id=n.id
                WHERE n.qualified_name='pkg::a'"""
         ).fetchone()
         assert tuple(unchanged) == tuple(before)
@@ -223,9 +320,9 @@ def test_incremental_save_preserves_stable_rows_and_updates_indexes(tmp_path: Pa
         assert loaded.find_by_qname("pkg::b") is None
         assert loaded.find_by_qname("pkg::c") is not None
         persisted_a = store._conn.execute(
-            "SELECT node_id FROM nodes WHERE qualified_name='pkg::a'"
+            "SELECT id FROM nodes WHERE qualified_name='pkg::a'"
         ).fetchone()
-        assert persisted_a["node_id"] == before["node_id"]
+        assert persisted_a["id"] == before["node_db_id"]
         assert store.get_file_hashes() == {"pkg.py": "new-hash"}
         assert any(hit[0] == "pkg::a" for hit in store.fts_search("renamed", 10))
         assert store.get_embedding_stats()[0] == 2
@@ -255,7 +352,7 @@ def test_legacy_mcp_search_matches_current_hybrid_search_signature() -> None:
 
     result = server._execute_operation("search", {"query": "entry"})
 
-    assert result[0].node.qualified_name == "pkg::entry"
+    assert result["results"][0]["qualified_name"] == "pkg::entry"
 
 
 def test_strict_pipeline_reports_invalid_source(tmp_path: Path) -> None:

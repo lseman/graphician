@@ -103,7 +103,11 @@ def _walk_scope(
     file_is_test: bool,
 ) -> None:
     for child in node.children:
-        if child.type == "class_definition":
+        if child.type == "decorated_definition":
+            _walk_scope(
+                child, graph, file_qn, parent_id, scope, parent_is_class, file_is_test
+            )
+        elif child.type == "class_definition":
             _handle_class(child, graph, file_qn, parent_id, scope, file_is_test)
         elif child.type == "function_definition":
             _handle_function(child, graph, file_qn, parent_id, scope, parent_is_class, file_is_test)
@@ -135,9 +139,9 @@ def _handle_class(
     graph.add_edge(parent_id, class_id, Edge.extracted(EdgeKind.DEFINES))
 
     # Handle inheritance
-    bases = None
+    bases = node.child_by_field_name("superclasses")
     for c in node.children:
-        if c.type in ("arguments", "base_list"):
+        if bases is None and c.type in ("arguments", "argument_list", "base_list"):
             bases = c
             break
     if bases:

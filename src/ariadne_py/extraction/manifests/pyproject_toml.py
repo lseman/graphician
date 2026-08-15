@@ -77,7 +77,11 @@ def extract_pyproject_toml(path: Path, graph: Graph) -> dict[str, Any]:
         )
 
     # Extract entry points
-    if "entry-points" in data:
+    if project.get("entry-points"):
+        result["extracted"] += _extract_entry_points(
+            project["entry-points"], file_key, graph
+        )
+    elif "entry-points" in data:
         result["extracted"] += _extract_entry_points(data["entry-points"], file_key, graph)
     elif "tool" in data and "poetry" in data["tool"]:
         poetry = data["tool"]["poetry"]

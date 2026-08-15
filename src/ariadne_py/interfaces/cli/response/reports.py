@@ -21,7 +21,7 @@ def generate_report_markdown(db_path: str, top: int = 25) -> str:
     Returns:
         Markdown report string.
     """
-    from ...persistence.store import GraphStore
+    from ....persistence.store import GraphStore
 
     store = GraphStore(db_path)
     try:
@@ -171,13 +171,15 @@ def export_graphml(graph, output: str) -> dict[str, Any]:
     Returns:
         Export result dict.
     """
-    from ...analysis.communities import detect_communities
+    from ....analysis.communities import detect_communities
 
     communities = detect_communities(graph)
     comm_map: dict[int, int] = {}
     for comm in communities.get("communities", []):
-        for nid in comm.get("node_ids", []):
-            comm_map[nid] = comm.get("id", 0)
+        for item in comm.get("nodes", []):
+            node_id = graph.find_by_qname(item.get("qualified_name", ""))
+            if node_id is not None:
+                comm_map[node_id] = comm.get("id", 0)
 
     lines: list[str] = []
     lines.append('<?xml version="1.0" encoding="UTF-8"?>')
@@ -189,10 +191,9 @@ def export_graphml(graph, output: str) -> dict[str, Any]:
     lines.append('  <key id="edge_kind" for="edge" attr.name="kind" attr.type="string"/>')
     lines.append('  <graph edgedefault="directed">')
 
-    node_map: dict[int, str] = {}
+    node_map: dict[Any, str] = {}
     idx = 0
-    for _, node in graph.nodes():
-        nid = node.id if hasattr(node, "id") else id(node)
+    for nid, node in graph.nodes():
         graph_id = f"n{idx}"
         node_map[nid] = graph_id
         comm = comm_map.get(nid, -1)

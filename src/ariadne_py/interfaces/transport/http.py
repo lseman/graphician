@@ -15,6 +15,8 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
+from ...core.graph import Graph
+
 # Embed static assets from the static directory
 _STATIC_DIR = Path(__file__).parent.parent.parent.parent / "static"
 
@@ -80,8 +82,8 @@ class AriadneHTTPHandler(SimpleHTTPRequestHandler):
             from ...persistence.store import GraphStore
             from ..cli.response import architecture_overview_json
 
-            store = GraphStore(self.graph_db)
-            graph = store.load_graph()
+            with GraphStore(self.graph_db) as store:
+                graph = store.load_graph()
 
             # Get community assignments
             communities = self._get_communities(graph)
@@ -165,8 +167,8 @@ class AriadneHTTPHandler(SimpleHTTPRequestHandler):
             from ...persistence.store import GraphStore
             from ...analysis.search import ranked_search
 
-            store = GraphStore(self.graph_db)
-            graph = store.load_graph()
+            with GraphStore(self.graph_db) as store:
+                graph = store.load_graph()
 
             # Search
             hits = ranked_search(graph, query, offset + limit)

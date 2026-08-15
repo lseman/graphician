@@ -169,9 +169,10 @@ def _walk_body(
     """Walk a body and emit definitions."""
     for child in _children(node):
         if child.type == "import_statement":
-            _handle_import(child, source, graph, file_id)
+            _handle_import(child, source, graph, parent_id)
         elif child.type == "export_statement":
-            _handle_export(child, source, graph, file_id)
+            _handle_export(child, source, graph, parent_id)
+            _walk_body(child, source, graph, file_qn, parent_id, scope)
         elif child.type == "function_declaration":
             _handle_function(child, source, graph, file_qn, parent_id, scope, False)
         elif child.type == "class_declaration":

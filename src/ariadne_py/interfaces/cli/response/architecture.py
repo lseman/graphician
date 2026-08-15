@@ -7,9 +7,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ....core.edge import EdgeKind
-
-
 def architecture_overview_json(graph, detail: str = "standard") -> dict[str, Any]:
     """Architecture overview at community level.
 
@@ -114,39 +111,45 @@ def community_split_json(graph, threshold: float = 0.25, min_size: int = 10) -> 
 # ── Helpers ────────────────────────────────────────────────────────
 
 
-def _detect_communities(graph) -> dict[int, int]:
+def _detect_communities(graph) -> dict[Any, int]:
     """Detect communities using connected components (simple heuristic)."""
     # Use Louvain-like approach: group nodes by source file
     file_groups: dict[str, int] = {}
     node_id = 0
-    communities: dict[int, int] = {}
+    communities: dict[Any, int] = {}
 
-    for _, node in graph.nodes():
+    for current_id, node in graph.nodes():
         source = node.source_uri or ""
         if not source:
             continue
         if source not in file_groups:
             file_groups[source] = node_id
             node_id += 1
-        communities[node.id if hasattr(node, "id") else id(node)] = file_groups[source]
+        communities[current_id] = file_groups[source]
 
     return communities
 
 
 def _compute_cohesion(graph, by_comm: dict[int, list]) -> dict[int, float]:
     """Compute cohesion for each community."""
+    node_communities = {
+        node_id: community
+        for community, members in by_comm.items()
+        for node_id in members
+    }
+    internal_edges: dict[int, int] = {}
+    for _, src, dst, _edge in graph.edges():
+        source_community = node_communities.get(src)
+        if source_community is not None and source_community == node_communities.get(dst):
+            internal_edges[source_community] = internal_edges.get(source_community, 0) + 1
+
     cohesion: dict[int, float] = {}
     for cid, members in by_comm.items():
         if len(members) <= 1:
             cohesion[cid] = 1.0
             continue
-        internal_edges = 0
-        member_set = set(members)
-        for _, src, dst, _ in graph.edges():
-            if src in member_set and dst in member_set:
-                internal_edges += 1
         total_possible = len(members) * (len(members) - 1)
-        cohesion[cid] = internal_edges / total_possible if total_possible > 0 else 0.0
+        cohesion[cid] = internal_edges.get(cid, 0) / total_possible
     return cohesion
 
 
@@ -190,7 +193,7 @@ def _community_summaries(
     return summaries[: _limit_for_detail(detail, 12)]
 
 
-def _cross_community_coupling(graph, communities: dict[int, int], detail: str) -> list[dict[str, Any]]:
+def _cross_community_coupling(graph, communities: dict[Any, int], detail: str) -> list[dict[str, Any]]:
     """Compute cross-community coupling edges."""
     coupling: dict[tuple[int, int], int] = {}
     for _, src, dst, _ in graph.edges():
@@ -207,10 +210,10 @@ def _cross_community_coupling(graph, communities: dict[int, int], detail: str) -
     return rows[: _limit_for_detail(detail, 10)]
 
 
-def _bridge_rows(graph, communities: dict[int, int], detail: str) -> list[dict[str, Any]]:
+def _bridge_rows(graph, communities: dict[Any, int], detail: str) -> list[dict[str, Any]]:
     """Find bridge nodes (nodes connecting multiple communities)."""
     comm_degree: dict[int, int] = {}
-    node_comms: dict[int, set] = {}
+    node_comms: dict[Any, set[int]] = {}
 
     for _, src, dst, _ in graph.edges():
         for nid in (src, dst):

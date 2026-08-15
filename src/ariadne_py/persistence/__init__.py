@@ -5,6 +5,7 @@ Mirrors the Rust ``persistence/mod.rs`` re-exports.
 
 from .store import (
     GraphStore,
+    IncompatibleDatabaseError,
     DEFAULT_EMBEDDING_DIM,
     DEFAULT_EMBEDDING_MODEL,
     EdgeIdentity,
@@ -28,6 +29,8 @@ from .embeddings.local import (
 
 __all__ = [
     "GraphStore",
+    "IncompatibleDatabaseError",
+    "EdgeIdentity",
     "FTSIndex",
     "build_external_embeddings",
     "build_local_embeddings",

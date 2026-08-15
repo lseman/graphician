@@ -9,7 +9,7 @@ from ...core.edge import Edge, EdgeKind
 from ...core.id import NodeId
 from ...core.node import Node, NodeKind
 from .types import FlowOptions
-from .entry_points import _is_python_framework_entry
+from .entry_points import _is_framework_entry
 from .trace import _trace_flow, _compute_criticality, _is_test_node
 
 

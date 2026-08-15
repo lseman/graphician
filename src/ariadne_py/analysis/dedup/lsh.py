@@ -79,7 +79,11 @@ def lsh_candidate_pairs(
         for id_b in candidates:
             if id_b == id_a:
                 continue
-            pair = (min(id_a, id_b), max(id_a, id_b))
+            pair = (
+                (id_a, id_b)
+                if id_a.value < id_b.value
+                else (id_b, id_a)
+            )
             if pair in pair_seen:
                 continue
             pair_seen.add(pair)

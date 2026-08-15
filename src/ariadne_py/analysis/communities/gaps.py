@@ -25,10 +25,10 @@ def knowledge_gaps(graph: Graph) -> dict[str, Any]:
     degree: dict[int, int] = defaultdict(int)
     tested_nodes: set[int] = set()
     for _, src, dst, edge in graph.edges():
-        degree[src] += 1
-        degree[dst] += 1
+        degree[src.value] += 1
+        degree[dst.value] += 1
         if edge.kind == EdgeKind.TESTED_BY:
-            tested_nodes.add(src)
+            tested_nodes.add(src.value)
 
     # Isolated nodes: degree <= 1, excluding File nodes
     isolated: list[dict[str, Any]] = []

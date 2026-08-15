@@ -128,7 +128,7 @@ def extract_file(path: Path, graph: Graph) -> None:
 
     # Emit includes at top level
     for child in _children(root):
-        if child.type == "include":
+        if child.type in {"include", "preproc_include"}:
             _handle_include(child, source, graph, file_id)
 
     # Walk top-level definitions
@@ -145,8 +145,8 @@ def _walk_body(
 ) -> None:
     """Walk a body and emit definitions."""
     for child in _children(node):
-        if child.type == "include":
-            _handle_include(child, source, graph, file_id)
+        if child.type in {"include", "preproc_include"}:
+            _handle_include(child, source, graph, parent_id)
         elif child.type == "namespace_definition":
             _handle_namespace(child, source, graph, file_qn, parent_id, scope)
         elif child.type == "class_specifier":
@@ -162,7 +162,7 @@ def _walk_body(
 def _handle_include(node: ts.Node, source: str, graph: Graph, file_id: NodeId) -> None:
     """Handle #include directives."""
     for child in _children(node):
-        if child.type == "string_literal":
+        if child.type in {"string_literal", "system_lib_string"}:
             include_path = _text(child).strip('"<>')
             mod_qn = f"include::{include_path}"
             mod_id = _add_node(graph, NodeKind.MODULE, mod_qn, Path(""), 0, 0)

@@ -26,6 +26,7 @@ def build_jedi_script(
         A Python script string that can be executed via ``python3 -c``.
     """
     json_calls = json.dumps(pending)
+    json_calls_literal = repr(json_calls)
     repo_root_str = str(repo_root)
 
     return f'''import jedi, json, sys
@@ -33,7 +34,7 @@ from pathlib import Path
 
 repo_root = Path(r"{repo_root_str}")
 
-py_dirs = sorted(set(Path(p).parent for p, _, _, _, _ in json.loads(r"{json_calls}")))
+py_dirs = sorted(set(Path(p).parent for p, _, _, _, _ in json.loads({json_calls_literal})))
 if py_dirs:
     common_root = Path.commonpath(str(p) for p in py_dirs)
 else:
@@ -60,7 +61,7 @@ def resolve_via_infer(script, line, col):
         return None
 
 results = []
-for file_path, jedi_line, col, method_name, enclosing in json.loads(r"{json_calls}"):
+for file_path, jedi_line, col, method_name, enclosing in json.loads({json_calls_literal}):
     try:
         with open(file_path, "r", errors="replace") as f:
             source = f.read()
@@ -80,7 +81,7 @@ for file_path, jedi_line, col, method_name, enclosing in json.loads(r"{json_call
                 if parent and parent.type == "class":
                     target = f"{{module_path}}::{{parent.name}}.{{method_name}}"
                 else:
-                    target = f"{{module_path}}::{{name}}"
+                    target = f"{{module_path}}::{{names.name}}"
                 results.append([file_path, jedi_line, enclosing, target])
             continue
 

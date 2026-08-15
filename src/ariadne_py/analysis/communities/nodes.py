@@ -90,12 +90,13 @@ def find_god_nodes(
     top: int = 20,
 ) -> dict[str, Any]:
     """Find top nodes by PageRank."""
-    nx_graph = _to_networkx(graph)
-    pagerank = nx.pagerank(nx_graph, alpha=0.85)
+    from ..centrality import pagerank
+
+    scores = pagerank(graph, damping=0.85)
 
     gods: list[dict[str, Any]] = []
-    for nid, score in sorted(pagerank.items(), key=lambda x: x[1], reverse=True)[:top]:
-        node = graph.node(NodeId(nid))
+    for nid, score in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top]:
+        node = graph.node(nid)
         if node:
             gods.append({
                 "qualified_name": node.qualified_name,
@@ -112,6 +113,9 @@ def compute_centrality(
     """Compute all centrality measures."""
     nx_graph = _to_networkx(graph)
 
+    from ..centrality import pagerank
+
+    pagerank_scores = pagerank(graph, damping=0.85)
     return {
         "degree_centrality": {
             graph.node(NodeId(nid)).qualified_name if graph.node(NodeId(nid)) else f"node:{nid}":
@@ -132,10 +136,10 @@ def compute_centrality(
             )[:30]
         },
         "pagerank": {
-            graph.node(NodeId(nid)).qualified_name if graph.node(NodeId(nid)) else f"node:{nid}":
+            graph.node(nid).qualified_name if graph.node(nid) else f"node:{nid.value}":
             round(score, 6)
             for nid, score in sorted(
-                nx.pagerank(nx_graph).items(),
+                pagerank_scores.items(),
                 key=lambda x: x[1],
                 reverse=True,
             )[:30]

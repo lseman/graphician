@@ -181,9 +181,9 @@ def _resolve(graph, target: str) -> Any:
     except (ValueError, TypeError):
         pass
 
-    for _, node in graph.nodes():
+    for node_id, node in graph.nodes():
         if node.qualified_name == target or node.name == target:
-            return node.id if hasattr(node, "id") else None
+            return node_id
 
     return None
 

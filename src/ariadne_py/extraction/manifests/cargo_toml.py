@@ -148,7 +148,7 @@ def _extract_package(graph: Graph, pkg: dict[str, Any], source_uri: str) -> None
         pkg_id = graph.find_by_qname(f"package::{name}")
         ver_id = graph.find_by_qname(f"package::{name}::version")
         if pkg_id and ver_id:
-            graph.add_edge(pkg_id, ver_id, Edge.extracted(EdgeKind.PROPERTY))
+            graph.add_edge(pkg_id, ver_id, Edge.extracted(EdgeKind.DEFINES))
 
     # License node
     if license_name:
@@ -163,7 +163,7 @@ def _extract_package(graph: Graph, pkg: dict[str, Any], source_uri: str) -> None
         pkg_id = graph.find_by_qname(f"package::{name}")
         lic_id = graph.find_by_qname(f"package::{name}::license")
         if pkg_id and lic_id:
-            graph.add_edge(pkg_id, lic_id, Edge.extracted(EdgeKind.PROPERTY))
+            graph.add_edge(pkg_id, lic_id, Edge.extracted(EdgeKind.DEFINES))
 
     # Author nodes
     for author in authors:
@@ -177,7 +177,7 @@ def _extract_package(graph: Graph, pkg: dict[str, Any], source_uri: str) -> None
         pkg_id = graph.find_by_qname(f"package::{name}")
         author_id = graph.find_by_qname(f"package::{name}::author::{author}")
         if pkg_id and author_id:
-            graph.add_edge(pkg_id, author_id, Edge.extracted(EdgeKind.PROPERTY))
+            graph.add_edge(pkg_id, author_id, Edge.extracted(EdgeKind.DEFINES))
 
 
 def _extract_dependency(
@@ -191,7 +191,7 @@ def _extract_dependency(
     # Dependency node
     dep_qn = f"package::{dep_name}"
     dep_node = Node(
-        kind=NodeKind.DEPENDENCY,
+        kind=NodeKind.PACKAGE,
         name=dep_name,
         qualified_name=dep_qn,
         source_uri=source_uri,
@@ -221,7 +221,7 @@ def _extract_dependency(
             props["package"] = package
 
         dep_node = Node(
-            kind=NodeKind.DEPENDENCY,
+            kind=NodeKind.PACKAGE,
             name=dep_name,
             qualified_name=dep_qn,
             source_uri=source_uri,
@@ -242,12 +242,12 @@ def _extract_dependency(
             dep_id = graph.find_by_qname(dep_qn)
             ver_id = graph.find_by_qname(f"{dep_qn}::version")
             if dep_id and ver_id:
-                graph.add_edge(dep_id, ver_id, Edge.extracted(EdgeKind.PROPERTY))
+                graph.add_edge(dep_id, ver_id, Edge.extracted(EdgeKind.DEFINES))
 
     # If dep_spec is a string, treat as version shorthand
     elif isinstance(dep_spec, str):
         dep_node = Node(
-            kind=NodeKind.DEPENDENCY,
+            kind=NodeKind.PACKAGE,
             name=dep_name,
             qualified_name=dep_qn,
             source_uri=source_uri,
@@ -272,7 +272,7 @@ def _extract_feature(
     feature_qn = f"package::{pkg_name}::feature::{feature_name}"
 
     feature_node = Node(
-        kind=NodeKind.FEATURE,
+        kind=NodeKind.VARIABLE,
         name=feature_name,
         qualified_name=feature_qn,
         source_uri=source_uri,
@@ -285,7 +285,7 @@ def _extract_feature(
     pkg_id = graph.find_by_qname(pkg_qn)
     feat_id = graph.find_by_qname(feature_qn)
     if pkg_id and feat_id:
-        graph.add_edge(pkg_id, feat_id, Edge.extracted(EdgeKind.PROPERTY))
+        graph.add_edge(pkg_id, feat_id, Edge.extracted(EdgeKind.DEFINES))
 
     # Link feature to its dependency features
     for dep in feature_deps:
@@ -300,7 +300,7 @@ def _extract_workspace(graph: Graph, workspace: dict[str, Any], source_uri: str)
     """Extract workspace configuration."""
     ws_qn = f"workspace::{Path(source_uri).parent.name}"
     ws_node = Node(
-        kind=NodeKind.WORKSPACE,
+        kind=NodeKind.MODULE,
         name=Path(source_uri).parent.name,
         qualified_name=ws_qn,
         source_uri=source_uri,
@@ -321,7 +321,7 @@ def _extract_workspace(graph: Graph, workspace: dict[str, Any], source_uri: str)
         ws_id = graph.find_by_qname(ws_qn)
         member_id = graph.find_by_qname(member_qn)
         if ws_id and member_id:
-            graph.add_edge(ws_id, member_id, Edge.extracted(EdgeKind.CONTAINS))
+            graph.add_edge(ws_id, member_id, Edge.extracted(EdgeKind.DEFINES))
 
     # Workspace resolver
     resolver = workspace.get("resolver")
@@ -337,14 +337,14 @@ def _extract_workspace(graph: Graph, workspace: dict[str, Any], source_uri: str)
         ws_id = graph.find_by_qname(ws_qn)
         res_id = graph.find_by_qname(f"{ws_qn}::resolver")
         if ws_id and res_id:
-            graph.add_edge(ws_id, res_id, Edge.extracted(EdgeKind.PROPERTY))
+            graph.add_edge(ws_id, res_id, Edge.extracted(EdgeKind.DEFINES))
 
     # Workspace dependencies
     workspace_deps = workspace.get("dependencies", {})
     for dep_name, dep_spec in workspace_deps.items():
         dep_qn = f"workspace::dep::{dep_name}"
         dep_node = Node(
-            kind=NodeKind.DEPENDENCY,
+            kind=NodeKind.PACKAGE,
             name=dep_name,
             qualified_name=dep_qn,
             source_uri=source_uri,
@@ -354,14 +354,14 @@ def _extract_workspace(graph: Graph, workspace: dict[str, Any], source_uri: str)
         ws_id = graph.find_by_qname(ws_qn)
         dep_id = graph.find_by_qname(dep_qn)
         if ws_id and dep_id:
-            graph.add_edge(ws_id, dep_id, Edge.extracted(EdgeKind.CONTAINS))
+            graph.add_edge(ws_id, dep_id, Edge.extracted(EdgeKind.DEFINES))
 
 
 def _extract_target(graph: Graph, target_triple: str, target_data: dict, source_uri: str) -> None:
     """Extract target-specific configuration."""
     target_qn = f"target::{target_triple}"
     target_node = Node(
-        kind=NodeKind.TARGET,
+        kind=NodeKind.VARIABLE,
         name=target_triple,
         qualified_name=target_qn,
         source_uri=source_uri,
@@ -373,7 +373,7 @@ def _extract_target(graph: Graph, target_triple: str, target_data: dict, source_
     for dep_name, dep_spec in deps.items():
         dep_qn = f"target::{target_triple}::dep::{dep_name}"
         dep_node = Node(
-            kind=NodeKind.DEPENDENCY,
+            kind=NodeKind.PACKAGE,
             name=dep_name,
             qualified_name=dep_qn,
             source_uri=source_uri,

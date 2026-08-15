@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Iterable
+import time
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..core.graph import Graph
 from .impact import ImpactQuery, find_impact
+
+if TYPE_CHECKING:
+    from ..persistence.store import GraphStore
 
 
 @dataclass(frozen=True)
@@ -38,6 +43,72 @@ class ImpactAccuracy:
             self.false_positives + other.false_positives,
             self.false_negatives + other.false_negatives,
         )
+
+
+@dataclass(frozen=True)
+class OperationalBaseline:
+    """Repeatable measurements for loading and querying a built graph."""
+
+    node_count: int
+    edge_count: int
+    embedding_count: int
+    embedding_model: str | None
+    fts_indexed_nodes: int
+    store_load_p50_ms: float
+    store_load_p95_ms: float
+    search_p50_ms: float
+    search_p95_ms: float
+    call_resolution_rate: float
+    sample_count: int
+
+
+def benchmark_store(
+    store: GraphStore,
+    *,
+    samples: int = 11,
+    query: str = "graph query",
+    timer: Callable[[], float] = time.perf_counter,
+) -> OperationalBaseline:
+    """Measure already-built store operations without hiding build setup."""
+    if samples < 1:
+        raise ValueError("samples must be at least 1")
+
+    load_ms: list[float] = []
+    for _ in range(samples):
+        started = timer()
+        graph = store.load_graph()
+        load_ms.append((timer() - started) * 1000.0)
+
+    search_ms: list[float] = []
+    for _ in range(samples):
+        started = timer()
+        store.fts_search(query, 25)
+        search_ms.append((timer() - started) * 1000.0)
+
+    from .structure import call_resolution_stats
+
+    calls = call_resolution_stats(graph)
+    embedding_count, embedding_model = store.get_embedding_stats() or (0, None)
+    return OperationalBaseline(
+        node_count=graph.node_count(),
+        edge_count=graph.edge_count(),
+        embedding_count=embedding_count,
+        embedding_model=embedding_model,
+        fts_indexed_nodes=store.fts_stats(),
+        store_load_p50_ms=_percentile(load_ms, 50),
+        store_load_p95_ms=_percentile(load_ms, 95),
+        search_p50_ms=_percentile(search_ms, 50),
+        search_p95_ms=_percentile(search_ms, 95),
+        call_resolution_rate=round(float(calls["rate"]), 3),
+        sample_count=samples,
+    )
+
+
+def _percentile(samples: list[float], percentile: int) -> float:
+    """Nearest-rank percentile matching the Rust evaluation harness."""
+    ordered = sorted(samples)
+    index = ((len(ordered) - 1) * percentile + 99) // 100
+    return round(ordered[index], 3)
 
 
 def impact_accuracy(predicted: Iterable[str], relevant: Iterable[str]) -> ImpactAccuracy:

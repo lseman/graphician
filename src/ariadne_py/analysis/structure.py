@@ -5,6 +5,7 @@ Graph algorithms for understanding architectural properties.
 
 from __future__ import annotations
 
+import heapq
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Iterator
@@ -70,6 +71,12 @@ def cyclic_components(graph: Graph) -> list[Component]:
     indices: dict[NodeId, int] = {}
     lowlinks: dict[NodeId, int] = {}
     components: list[list[NodeId]] = []
+    adjacency: dict[NodeId, list[NodeId]] = defaultdict(list)
+    self_loop_nodes: set[NodeId] = set()
+    for _, source, target, _edge in graph.edges():
+        adjacency[source].append(target)
+        if source == target:
+            self_loop_nodes.add(source)
 
     def strong_connect(v: NodeId) -> None:
         indices[v] = index_counter[0]
@@ -78,16 +85,12 @@ def cyclic_components(graph: Graph) -> list[Component]:
         stack.append(v)
         on_stack.add(v)
 
-        v_node = graph.node(v)
-        if v_node is not None:
-            for _, _src, dst, _edge in graph.edges():
-                if _src == v:
-                    neighbor = dst
-                    if neighbor not in indices:
-                        strong_connect(neighbor)
-                        lowlinks[v] = min(lowlinks[v], lowlinks[neighbor])
-                    elif neighbor in on_stack:
-                        lowlinks[v] = min(lowlinks[v], indices[neighbor])
+        for neighbor in adjacency.get(v, []):
+            if neighbor not in indices:
+                strong_connect(neighbor)
+                lowlinks[v] = min(lowlinks[v], lowlinks[neighbor])
+            elif neighbor in on_stack:
+                lowlinks[v] = min(lowlinks[v], indices[neighbor])
 
         if lowlinks[v] == indices[v]:
             component: list[NodeId] = []
@@ -104,11 +107,6 @@ def cyclic_components(graph: Graph) -> list[Component]:
             strong_connect(nid)
 
     # Filter to only cyclic components (size > 1 or self-loop)
-    self_loop_nodes: set[NodeId] = set()
-    for _, src, dst, _edge in graph.edges():
-        if src == dst:
-            self_loop_nodes.add(src)
-
     return [
         Component(nodes=c)
         for c in components
@@ -136,11 +134,13 @@ def core_numbers(graph: Graph) -> dict[NodeId, int]:
     }
     core_map: dict[NodeId, int] = {}
     current_core = 0
+    heap = [(node_degree, node) for node, node_degree in degree.items()]
+    heapq.heapify(heap)
 
-    while remaining:
-        # Find node with minimum degree in remaining
-        node = min(remaining, key=lambda n: degree.get(n, 0))
-        min_degree = degree.get(node, 0)
+    while heap:
+        min_degree, node = heapq.heappop(heap)
+        if node not in remaining or min_degree != degree[node]:
+            continue
         current_core = max(current_core, min_degree)
         core_map[NodeId(node)] = current_core
         remaining.discard(node)
@@ -149,6 +149,7 @@ def core_numbers(graph: Graph) -> dict[NodeId, int]:
         for neighbor in adj.get(node, set()):
             if neighbor in remaining:
                 degree[neighbor] = max(0, degree[neighbor] - 1)
+                heapq.heappush(heap, (degree[neighbor], neighbor))
 
     return core_map
 
@@ -211,23 +212,25 @@ def bridge_scores(
     Combines community touchpoints, degree, approximate betweenness, and
     articulation-point bonus into a single score per node.
     """
-    articulation_set: set[NodeId] = set(_articulation_points(graph))
+    articulation_set: set[NodeId] = {
+        NodeId(node_id) for node_id in _articulation_points(graph)
+    }
     between = approx_betweenness(graph, max_sources=64)
+
+    touched_by_node: dict[NodeId, set[int]] = defaultdict(set)
+    degree_by_node: dict[NodeId, int] = defaultdict(int)
+    for _, source, target, _edge in graph.edges():
+        degree_by_node[source] += 1
+        degree_by_node[target] += 1
+        if target in communities:
+            touched_by_node[source].add(communities[target])
+        if source in communities:
+            touched_by_node[target].add(communities[source])
 
     rows: list[BridgeScore] = []
     for nid, _ in graph.nodes():
-        # Count distinct communities touched by neighbors
-        touched: set[int] = set()
-        for _, src, dst, _edge in graph.edges():
-            if src == nid and dst in communities:
-                touched.add(communities[dst])
-            if dst == nid and src in communities:
-                touched.add(communities[src])
-        # Also check the reverse direction for in-neighbors
-        for _, src, dst, _edge in graph.edges():
-            pass  # Already handled above
-
-        degree = sum(1 for _ in graph.out_neighbors(nid)) + sum(1 for _ in graph.in_neighbors(nid))
+        touched = touched_by_node.get(nid, set())
+        degree = degree_by_node.get(nid, 0)
         approx_bw_val = between.get(nid, 0.0)
         is_art = nid in articulation_set
 
@@ -373,12 +376,13 @@ def find_god_nodes(
     top: int = 20,
 ) -> dict[str, Any]:
     """Top nodes by PageRank."""
-    nx_graph = _to_nx(graph)
-    pagerank = nx.pagerank(nx_graph, alpha=0.85)
+    from .centrality import pagerank
+
+    scores = pagerank(graph, damping=0.85)
 
     gods: list[dict[str, Any]] = []
-    for nid, score in sorted(pagerank.items(), key=lambda x: x[1], reverse=True)[:top]:
-        node = graph.node(NodeId(nid))
+    for nid, score in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top]:
+        node = graph.node(nid)
         if node:
             gods.append({
                 "qualified_name": node.qualified_name,
@@ -409,52 +413,6 @@ def find_large_functions(
 
     large.sort(key=lambda x: x["line_count"], reverse=True)
     return {"large_functions": large, "total": len(large)}
-
-
-def find_dead_code(
-    graph: Graph,
-) -> dict[str, Any]:
-    """Find nodes unreachable from entry points.
-
-    Entry points: functions not called by any other function,
-    or nodes with no incoming calls/imports edges.
-    """
-    nx_graph = _to_nx(graph)
-
-    # Find entry points: nodes with no incoming CALLS or IMPORTS edges
-    entry_points: set[int] = set()
-    for nid in nx_graph.nodes():
-        has_incoming = False
-        for _, src, _, edge in graph.edges():
-            if edge.kind in (EdgeKind.CALLS, EdgeKind.IMPORTS) and src.value == nid:
-                has_incoming = True
-                break
-        if not has_incoming:
-            entry_points.add(nid)
-
-    # If no entry points found, use all nodes as potential entries
-    if not entry_points:
-        entry_points = set(nx_graph.nodes())
-
-    # Find reachable nodes from entry points
-    reachable: set[int] = set()
-    for ep in entry_points:
-        reachable.update(nx.descendants(nx_graph, ep))
-        reachable.add(ep)
-
-    # Dead code: nodes not reachable from any entry point
-    dead: list[dict[str, Any]] = []
-    for nid in nx_graph.nodes():
-        if nid not in reachable:
-            node = graph.node(NodeId(nid))
-            if node:
-                dead.append({
-                    "qualified_name": node.qualified_name,
-                    "kind": node.kind.value,
-                    "name": node.name,
-                })
-
-    return {"dead_code": dead, "total": len(dead)}
 
 
 def find_counterfactual(

@@ -12,6 +12,8 @@ from __future__ import annotations
 import hashlib
 import fnmatch
 import logging
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -83,9 +85,18 @@ class ExtractionPipeline:
     and relationships, and populates a Graph.
     """
 
-    def __init__(self, registry: LanguageRegistry, *, strict: bool = False) -> None:
+    def __init__(
+        self,
+        registry: LanguageRegistry,
+        *,
+        strict: bool = False,
+        workers: int | None = None,
+    ) -> None:
         self.registry = registry
         self.strict = strict
+        # Tree-sitter releases enough native work for a small thread-level
+        # gain, but larger pools lose time to fragment merging and scheduling.
+        self.workers = 2 if workers is None else max(1, workers)
         self.graph = Graph()
         self._file_hashes: dict[str, str] = {}  # path → sha256
 
@@ -157,8 +168,7 @@ class ExtractionPipeline:
         files = self.discover_files(root)
         logger.info("Discovered %d source files in %s", len(files), root)
 
-        for file_path in files:
-            self._process_file(file_path, root)
+        self._process_files(files, root)
 
         # Post-extraction: resolve calls, resolve types, detect patterns, build flows
         self._resolve_calls()
@@ -177,6 +187,26 @@ class ExtractionPipeline:
         )
         return self.graph
 
+    def _process_files(self, files: list[Path], root: Path) -> None:
+        """Extract independent file fragments and merge them deterministically."""
+        if self.workers == 1 or len(files) < 2:
+            for file_path in files:
+                self._process_file(file_path, root)
+            return
+
+        extract = partial(self._extract_fragment, root=root)
+        with ThreadPoolExecutor(max_workers=min(self.workers, len(files))) as executor:
+            # executor.map preserves discovery order, keeping node IDs and
+            # serialized output deterministic while parsing happens in parallel.
+            for fragment, file_hashes in executor.map(extract, files):
+                self.graph.merge(fragment)
+                self._file_hashes.update(file_hashes)
+
+    def _extract_fragment(self, file_path: Path, *, root: Path) -> tuple[Graph, dict[str, str]]:
+        fragment = ExtractionPipeline(self.registry, strict=self.strict, workers=1)
+        fragment._process_file(file_path, root)
+        return fragment.graph, fragment._file_hashes
+
     def update(
         self,
         root: Path,
@@ -191,7 +221,11 @@ class ExtractionPipeline:
         """
         root = root.resolve()
         touched = [Path(path) for path in changed + deleted]
-        if any(path.suffix.lower() in DOCUMENT_SUFFIXES or path.name.lower() in MANIFEST_NAMES for path in touched):
+        if any(
+            path.suffix.lower() in DOCUMENT_SUFFIXES
+            or path.name.lower() in MANIFEST_NAMES
+            for path in touched
+        ):
             return self.build(root)
 
         self.graph = existing
@@ -274,6 +308,16 @@ class ExtractionPipeline:
         file_hash = hashlib.sha256(source.encode()).hexdigest()
         file_key = f"file::{rel_path}"
 
+        # Rust needs its specialized extractor: the generic walker does not
+        # understand function_item, trait_item, impl_item, use trees, or raw
+        # macro token trees. Keep the pipeline's path-qualified file key so
+        # equal stems in different directories cannot collide.
+        if spec.name is Language.RUST:
+            from .languages.parsers.rust import extract_file as extract_rust
+
+            extract_rust(file_path, self.graph, file_qn=file_key)
+            return
+
         # Create file node
         file_node = Node.new(NodeKind.FILE, file_key)
         file_node = file_node.with_source(
@@ -339,7 +383,12 @@ class ExtractionPipeline:
         # Determine module path from qualified name
         module_path = self._module_path(rel_path)
 
-        if node_type in ("function_definition", "function_declaration"):
+        method_types = (
+            "method_definition",
+            "method_declaration",
+            "constructor_declaration",
+        )
+        if node_type in ("function_definition", "function_declaration", *method_types):
             name_node = None
             for child in node.children:
                 if child.type in ("identifier", "name", "property_identifier"):
@@ -349,12 +398,18 @@ class ExtractionPipeline:
                 name_node = node.field_dict.get("name")
 
             if name_node is not None:
-                qname = f"{file_key}::{module_path}::{name_node.text.decode()}"
-                func_node = Node.new(NodeKind.FUNCTION, qname)
+                prefix = parent_qname or f"{file_key}::{module_path}"
+                qname = f"{prefix}::{name_node.text.decode()}"
+                kind = (
+                    NodeKind.METHOD
+                    if parent_qname or node_type in method_types
+                    else NodeKind.FUNCTION
+                )
+                func_node = Node.new(kind, qname)
                 func_node = func_node.with_source(
                     str(rel_path),
-                    name_node.start_point[0] + 1,
-                    name_node.end_point[0] + 1,
+                    node.start_point[0] + 1,
+                    node.end_point[0] + 1,
                 )
                 func_node = func_node.with_source_text(
                     self._extract_body(source, node)
@@ -391,7 +446,8 @@ class ExtractionPipeline:
                 name_node = node.field_dict.get("name")
 
             if name_node is not None:
-                qname = f"{file_key}::{module_path}::{name_node.text.decode()}"
+                prefix = parent_qname or f"{file_key}::{module_path}"
+                qname = f"{prefix}::{name_node.text.decode()}"
                 class_node = Node.new(NodeKind.CLASS, qname)
                 class_node = class_node.with_source(
                     str(rel_path),
@@ -411,7 +467,13 @@ class ExtractionPipeline:
 
                 # Walk children for methods
                 for child in node.children:
-                    if child.type in ("body", "member_declarations", "fields"):
+                    if child.type in (
+                        "body",
+                        "block",
+                        "member_declarations",
+                        "class_body",
+                        "fields",
+                    ):
                         self._walk_symbols(
                             child, source, rel_path, spec, file_key,
                             depth + 1, parent_qname=qname,
@@ -425,6 +487,18 @@ class ExtractionPipeline:
                     child, source, rel_path, spec, file_key, depth,
                     parent_qname=parent_qname,
                 )
+        else:
+            for child in node.children:
+                if child.is_named:
+                    self._walk_symbols(
+                        child,
+                        source,
+                        rel_path,
+                        spec,
+                        file_key,
+                        depth,
+                        parent_qname=parent_qname,
+                    )
 
     def _module_path(self, rel_path: Path) -> str:
         """Convert file path to module path.
@@ -559,45 +633,72 @@ class ExtractionPipeline:
         spec: Any,
     ) -> None:
         """Extract function calls from AST."""
-        self._walk_calls(tree.root_node, source, file_key)
+        file_id = self.graph.find_by_qname(file_key)
+        if file_id is not None:
+            self._walk_calls(tree.root_node, source, file_key, file_id)
 
-    def _walk_calls(self, node: Any, source: str, file_key: str) -> None:
+    def _walk_calls(
+        self,
+        node: Any,
+        source: str,
+        file_key: str,
+        caller_id: NodeId,
+    ) -> None:
         """Recursively find call expressions."""
         node_type = node.type
 
+        if node_type in (
+            "function_definition",
+            "function_declaration",
+            "method_definition",
+            "method_declaration",
+            "constructor_declaration",
+        ):
+            definition_id = self._definition_id(node, file_key)
+            if definition_id is not None:
+                caller_id = definition_id
+
         if node_type in ("call_expression", "call"):
-            self._parse_call_node(node, file_key)
-        elif node_type == "method_definition":
-            # Check for super() calls
-            for child in node.children:
-                if child.type == "formal_parameters":
-                    continue
-                self._walk_calls(child, source, file_key)
-
+            self._parse_call_node(node, caller_id)
         for child in node.children:
-            self._walk_calls(child, source, file_key)
+            self._walk_calls(child, source, file_key, caller_id)
 
-    def _parse_call_node(self, node: Any, file_key: str) -> None:
+    def _definition_id(self, node: Any, file_key: str) -> NodeId | None:
+        name_node = node.child_by_field_name("name")
+        if name_node is None:
+            return None
+        name = name_node.text.decode("utf-8", errors="replace")
+        line = node.start_point[0] + 1
+        for node_id, candidate in self.graph.nodes():
+            if (
+                candidate.qualified_name.startswith(f"{file_key}::")
+                and candidate.name == name
+                and candidate.line_start == line
+                and candidate.kind in (NodeKind.FUNCTION, NodeKind.METHOD)
+            ):
+                return node_id
+        return None
+
+    def _parse_call_node(self, node: Any, caller_id: NodeId) -> None:
         """Parse a call expression and record the call."""
         func = node.child_by_field_name("function")
         if func is None:
             return
 
-        call_text = func.text.decode()
-        # Skip built-in calls and super()
-        if call_text in ("super", "print", "len", "range", "type", "isinstance"):
+        call_text = func.text.decode("utf-8", errors="replace")
+        name = call_text.rsplit(".", 1)[-1]
+        from .call_resolution import should_suppress_call_placeholder
+
+        if not name or should_suppress_call_placeholder(name):
             return
 
-        # Build call target qname
-        target_qname = f"{file_key}::{call_text}"
+        target_qname = f"call::{name}"
         call_node = Node.new(NodeKind.FUNCTION, target_qname)
-        self.graph.add_node(call_node)
-
-        self.graph.add_edge(
-            self.graph.find_by_qname(file_key) or NodeId(-1),
-            self.graph.find_by_qname(target_qname) or NodeId(-1),
-            Edge.extracted(EdgeKind.CALLS),
-        )
+        target_id = self.graph.add_node(call_node)
+        edge = Edge.ambiguous(EdgeKind.CALLS)
+        if "." in call_text:
+            edge = edge.with_property("call_receiver", call_text.rsplit(".", 1)[0])
+        self.graph.add_edge(caller_id, target_id, edge)
 
     # ── Inheritance extraction ───────────────────────────────────────
 

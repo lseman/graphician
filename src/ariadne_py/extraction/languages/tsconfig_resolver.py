@@ -91,6 +91,7 @@ def resolve_ts_path_aliases(
             details.append({"module": mod_name, "reason": "alias_not_found"})
             continue
 
+        resolved_path = Path(resolved_path)
         resolved_qn = f"file::{resolved_path}"
         stem = resolved_path.stem if resolved_path.stem else resolved_path.name
         graph.rename_node(mod_id, resolved_qn, stem)

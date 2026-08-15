@@ -37,7 +37,6 @@ from .structure import (
     find_large_functions,
     find_dead_code,
     find_counterfactual,
-    find_motifs,
     compute_surprise_scoring,
     rename_preview,
     export_graphml,

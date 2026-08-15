@@ -239,6 +239,46 @@ def _extract_receiver(func_node: ts.Node) -> str | None:
     return None
 
 
+def _expand_use_paths(node: ts.Node, prefix: str = "") -> list[str]:
+    """Expand a Rust use-tree AST into concrete import paths.
+
+    ``use std::{fmt, collections::{HashMap, HashSet}}`` becomes three
+    independently resolvable module targets. Aliases retain the source path;
+    the local alias is not a module identity.
+    """
+    if node.type == "scoped_use_list":
+        path = node.child_by_field_name("path")
+        use_list = node.child_by_field_name("list")
+        base = _join_use_path(prefix, _text(path)) if path else prefix
+        return _expand_use_paths(use_list, base) if use_list else [base]
+
+    if node.type == "use_list":
+        paths: list[str] = []
+        for child in node.named_children:
+            paths.extend(_expand_use_paths(child, prefix))
+        return paths
+
+    if node.type == "use_as_clause":
+        path = node.child_by_field_name("path")
+        return _expand_use_paths(path, prefix) if path else []
+
+    text = _text(node).strip().rstrip(";")
+    if not text:
+        return []
+    if text == "self":
+        return [prefix] if prefix else [text]
+    return [_join_use_path(prefix, text)]
+
+
+def _join_use_path(prefix: str, path: str) -> str:
+    path = path.strip()
+    if not prefix:
+        return path
+    if not path or path == "self":
+        return prefix
+    return f"{prefix}::{path}"
+
+
 def _emit_calls_in_body(
     graph: Graph,
     caller_id: NodeId,
@@ -391,7 +431,7 @@ def _walk_impl_body(
                 _emit_calls_in_body(graph, fn_id, fn_body)
 
 
-def extract_file(path: Path, graph: Graph) -> None:
+def extract_file(path: Path, graph: Graph, *, file_qn: str | None = None) -> None:
     with open(path, "rb") as f:
         raw = f.read()
     source = raw.decode("utf-8", errors="replace")
@@ -402,7 +442,7 @@ def extract_file(path: Path, graph: Graph) -> None:
     tree = parser.parse(raw)
     root = tree.root_node
 
-    file_qn = path.stem
+    file_qn = file_qn or path.stem
     file_id = _add_node(graph, NodeKind.FILE, file_qn, path, 0, 0, source)
 
     # Pre-compute #[cfg(test)] mod ranges for test detection.
@@ -564,16 +604,14 @@ def extract_file(path: Path, graph: Graph) -> None:
                 if name == "path":
                     path_node = cap
                     break
-        if path_node:
-            break
         if not path_node:
             continue
-        path_text = _text(path_node).strip().rstrip(";").strip()
-        if not path_text:
-            continue
-        mod_qn = f"module::{path_text}"
-        mod_id = _add_node(graph, NodeKind.MODULE, mod_qn, Path(""), 0, 0)
-        graph.add_edge(file_id, mod_id, Edge.extracted(EdgeKind.IMPORTS))
+        for path_text in _expand_use_paths(path_node):
+            if not path_text:
+                continue
+            mod_qn = f"module::{path_text}"
+            mod_id = _add_node(graph, NodeKind.MODULE, mod_qn, Path(""), 0, 0)
+            graph.add_edge(file_id, mod_id, Edge.extracted(EdgeKind.IMPORTS))
 
     # Mod declarations
     mod_q = ts.Query(language, r"(mod_item name: (identifier) @name) @def")
@@ -585,8 +623,6 @@ def extract_file(path: Path, graph: Graph) -> None:
                 if name == "name":
                     name_node = cap
                     break
-        if name_node:
-            break
         if not name_node:
             continue
         name = _text(name_node)

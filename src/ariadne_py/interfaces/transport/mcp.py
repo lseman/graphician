@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -423,10 +424,10 @@ class AriadneMCP:
         # Build neighborhood via BFS
         neighborhood: list[dict[str, Any]] = []
         visited: set[int] = {nid.value}
-        queue: list[tuple[int, int]] = [(nid.value, 0)]
+        queue = deque([(nid.value, 0)])
 
         while queue:
-            current, depth = queue.pop(0)
+            current, depth = queue.popleft()
             if depth >= max_hops:
                 continue
 
@@ -487,12 +488,12 @@ class AriadneMCP:
             return {"error": f"Symbol not found: {target}"}
         max_hops = max(0, int(params.get("max_hops", 3)))
         token_budget = max(0, int(params.get("token_budget", 1600)))
-        queue: list[tuple[NodeId, int]] = [(start, 0)]
+        queue = deque([(start, 0)])
         visited: set[int] = set()
         items: list[dict[str, Any]] = []
         used_tokens = 0
         while queue:
-            node_id, hops = queue.pop(0)
+            node_id, hops = queue.popleft()
             if node_id.value in visited or hops > max_hops:
                 continue
             visited.add(node_id.value)

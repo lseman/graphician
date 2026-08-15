@@ -69,7 +69,7 @@ def enrich_jedi_calls(graph: Graph, repo_root: Path) -> int:
 
     # Collect existing CALLS edges to avoid duplicates.
     existing_calls: set[tuple[str, int]] = set()
-    for _, src_node, dst_node, _ in _iter_edges(graph, EdgeKind.CALLS):
+    for _, src_node, _dst_node, _ in _iter_edges(graph, EdgeKind.CALLS):
         if src_node and src_node.line_start is not None:
             existing_calls.add((src_node.qualified_name, src_node.line_start))
 
@@ -150,4 +150,11 @@ def _iter_edges(
 
     Wrapper to avoid importing internal Graph details.
     """
-    return list(graph.edges()) if hasattr(graph, "edges") else []
+    if not hasattr(graph, "edges"):
+        return []
+    result = []
+    for edge_id, src_id, dst_id, edge in graph.edges():
+        if edge.kind != kind:
+            continue
+        result.append((edge_id, graph.node(src_id), graph.node(dst_id), edge))
+    return result

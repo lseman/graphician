@@ -43,6 +43,7 @@ def export_graphml(
         ("name", "string"),
         ("file", "string"),
         ("kind_raw", "string"),
+        ("community_id", "int"),
     ]:
         parts.append(
             f'  <key id="{attr}" for="node" attr.name="{attr}" attr.type="{typ}"/>'
@@ -95,8 +96,8 @@ def export_graphml(
         score = _confidence_score(edge.confidence)
         src_node = graph.node(src)
         dst_node = graph.node(dst)
-        src_file = _xml_escape(src_node.source_uri if src_node else "")
-        dst_file = _xml_escape(dst_node.source_uri if dst_node else "")
+        src_file = _xml_escape((src_node.source_uri if src_node else None) or "")
+        dst_file = _xml_escape((dst_node.source_uri if dst_node else None) or "")
 
         parts.append(
             f'    <edge id="e{eid.value}" source="n{src.value}" target="n{dst.value}">'

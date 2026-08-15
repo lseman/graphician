@@ -14,18 +14,22 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import deque
 from pathlib import Path
 from typing import Any
 
+from ....analysis.communities import detect_communities, knowledge_gaps
+from ....analysis.structure import find_dead_code
 from ....core.edge import EdgeKind
 from ....core.graph import Graph
+from ....core.id import NodeId
 from ....persistence.store import GraphStore
 
 logger = logging.getLogger(__name__)
 
 # Sub-modules
 from .hints import SessionState, generate_hints
-from .temporal import detect_changes_json, risk_json
+from .temporal import detect_changes_json, graph_diff_json, risk_json
 from .reviews import (
     counterfactual_json,
     file_snippet,
@@ -295,7 +299,11 @@ def _tool_response(
         no_hints = params.get("no_hints", False) is True
         if not no_hints:
             hints = generate_hints(operation, response)
-            if hints and hints.get("next_steps") or hints.get("related") or hints.get("warnings"):
+            if hints and (
+                hints.get("next_steps")
+                or hints.get("related")
+                or hints.get("warnings")
+            ):
                 response["_hints"] = hints
 
         return response
@@ -311,12 +319,19 @@ def _dispatch(
     db_path: str,
 ) -> dict[str, Any]:
     """Route operation to handler."""
+    operation = {
+        "k_core": "core",
+        "articulation_points": "articulation",
+        "surprise_scoring": "surprises",
+        "health": "diagnostics",
+        "impact_radius": "blast_radius",
+    }.get(operation, operation)
     limit_fn = lambda d=_limit_param, p=params: d(p)
     base_fn = lambda p=params: _base_param(p)
 
     handlers = {
         "status": lambda: _status(graph),
-        "freshness": lambda: {"operation": "freshness"},
+        "freshness": lambda: _freshness(db_path),
         "search": lambda: _compact_for_detail(handle_search(graph, params), detail),
         "context_pack": lambda: _compact_for_detail(
             handle_context_pack(graph, params), detail
@@ -361,6 +376,9 @@ def _dispatch(
         "diagnostics": lambda: _compact_for_detail(
             diagnostics_json(db_path, limit_fn()), detail
         ),
+        "graph_diff": lambda: _compact_for_detail(
+            _graph_diff(graph, db_path, params), detail
+        ),
         "counterfactual": lambda: _compact_for_detail(
             counterfactual_json(
                 graph,
@@ -370,6 +388,10 @@ def _dispatch(
             ),
             detail,
         ),
+        "motifs": lambda: _compact_for_detail(_motifs(graph, params), detail),
+        "dedup": lambda: _compact_for_detail(_dedup(graph), detail),
+        "patterns": lambda: _compact_for_detail(_patterns(graph), detail),
+        "wiki": lambda: _compact_for_detail(_wiki(graph, params), detail),
         "suggested_questions": lambda: _compact_for_detail(
             suggested_questions_json(
                 detect_changes_json(graph, base_fn(), 2),
@@ -390,15 +412,7 @@ def _dispatch(
         "test_coverage": lambda: _compact_for_detail(
             handle_test_coverage(graph, db_path, params), detail
         ),
-        "test_coverage": lambda: _compact_for_detail(
-            {"operation": "test_coverage", "covered": 0, "missing": 0, "missing_count": 0},
-            detail,
-        ),
-        "report": lambda: {
-            "operation": "report",
-            "output": _required_str(params, "output"),
-            "written": True,
-        },
+        "report": lambda: _write_report(db_path, _required_str(params, "output")),
         "hub_nodes": lambda: _compact_for_detail(hub_nodes_json(graph, limit_fn()), detail),
         "community_split": lambda: _compact_for_detail(
             community_split_json(
@@ -408,33 +422,24 @@ def _dispatch(
             ),
             detail,
         ),
-        "dead_code": lambda: _compact_for_detail(
-            {
-                "operation": "dead_code",
-                "dead_nodes": [],
-                "total_dead": 0,
-            },
-            detail,
-        ),
+        "dead_code": lambda: _compact_for_detail(_dead_code(graph, limit_fn()), detail),
         "find_related": lambda: _compact_for_detail(
             find_related_json(graph, _required_str(params, "target"), params.get("line")),
             detail,
         ),
         "minimal_context": lambda: _compact_for_detail(
-            {
-                "operation": "minimal_context",
-                "nodes": [],
-                "edges": [],
-            },
-            detail,
+            _minimal_context(graph, params), detail
         ),
-        "context": lambda: _compact_for_detail(
-            {
-                "operation": "minimal_context",
-                "nodes": [],
-                "edges": [],
-            },
-            detail,
+        "context": lambda: _compact_for_detail(_minimal_context(graph, params), detail),
+        "communities": lambda: _compact_for_detail(
+            detect_communities(graph, params.get("algorithm", "leiden")), detail
+        ),
+        "knowledge_gaps": lambda: _compact_for_detail(knowledge_gaps(graph), detail),
+        "callers_of": lambda: _compact_for_detail(
+            _call_neighbors(graph, params, incoming=True), detail
+        ),
+        "callees_of": lambda: _compact_for_detail(
+            _call_neighbors(graph, params, incoming=False), detail
         ),
         "export_graphml": lambda: _compact_for_detail(
             export_graphml(graph, _required_str(params, "output")),
@@ -482,28 +487,226 @@ def _dispatch(
     return {"operation": operation, "error": f"unknown tool operation {operation}"}
 
 
+def _resolve_node(graph: Graph, target: str) -> NodeId | None:
+    """Resolve an exact qname, integer ID, or unambiguous symbol name."""
+    exact = graph.find_by_qname(target)
+    if exact is not None:
+        return exact
+    try:
+        candidate = NodeId(int(target))
+    except (TypeError, ValueError):
+        candidate = None
+    if candidate is not None and graph.node(candidate) is not None:
+        return candidate
+
+    matches = [node_id for node_id, node in graph.nodes() if node.name == target]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _minimal_context(graph: Graph, params: dict[str, Any]) -> dict[str, Any]:
+    """Return a bounded bidirectional neighborhood around one symbol."""
+    target = _required_str(params, "target")
+    start = _resolve_node(graph, target)
+    if start is None:
+        return {"operation": "minimal_context", "error": f"target not found: {target}"}
+
+    max_hops = max(0, min(int(params.get("max_hops", 2)), 8))
+    limit = max(1, min(_limit_param(params, 50), 500))
+    queue = deque([(start, 0)])
+    visited = {start}
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+    while queue and len(nodes) < limit:
+        node_id, depth = queue.popleft()
+        node = graph.node(node_id)
+        if node is None:
+            continue
+        nodes.append({
+            "qualified_name": node.qualified_name,
+            "kind": node.kind.value,
+            "name": node.name,
+            "source_uri": node.source_uri,
+            "line_start": node.line_start,
+            "line_end": node.line_end,
+            "depth": depth,
+        })
+        if depth >= max_hops:
+            continue
+        neighbors = [
+            (neighbor, edge, "out") for neighbor, edge in graph.out_neighbors(node_id)
+        ]
+        neighbors.extend(
+            (neighbor, edge, "in") for neighbor, edge in graph.in_neighbors(node_id)
+        )
+        for neighbor, edge, direction in neighbors:
+            neighbor_node = graph.node(neighbor)
+            if neighbor_node is None:
+                continue
+            edges.append({
+                "source": node.qualified_name if direction == "out" else neighbor_node.qualified_name,
+                "target": neighbor_node.qualified_name if direction == "out" else node.qualified_name,
+                "kind": edge.kind.value,
+            })
+            if neighbor not in visited:
+                visited.add(neighbor)
+                queue.append((neighbor, depth + 1))
+
+    return {
+        "operation": "minimal_context",
+        "target": graph.node(start).qualified_name,
+        "mode": params.get("mode", "review"),
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
+def _call_neighbors(
+    graph: Graph, params: dict[str, Any], *, incoming: bool
+) -> dict[str, Any]:
+    target = _required_str(params, "target")
+    node_id = _resolve_node(graph, target)
+    operation = "callers_of" if incoming else "callees_of"
+    result_key = "callers" if incoming else "callees"
+    if node_id is None:
+        return {"operation": operation, result_key: [], "error": f"target not found: {target}"}
+    iterator = graph.in_neighbors(node_id) if incoming else graph.out_neighbors(node_id)
+    hits = []
+    for neighbor_id, edge in iterator:
+        if edge.kind is not EdgeKind.CALLS:
+            continue
+        node = graph.node(neighbor_id)
+        if node is not None:
+            hits.append({
+                "qualified_name": node.qualified_name,
+                "kind": node.kind.value,
+                "source_uri": node.source_uri,
+                "edge_kind": edge.kind.value,
+            })
+    hits.sort(key=lambda item: item["qualified_name"])
+    hits = hits[: _limit_param(params, 50)]
+    return {"operation": operation, result_key: hits, "total": len(hits)}
+
+
+def _dead_code(graph: Graph, limit: int) -> dict[str, Any]:
+    result = find_dead_code(graph, limit)
+    return {
+        "operation": "dead_code",
+        "dead_nodes": result["dead_code"],
+        "total_dead": result["total"],
+    }
+
+
+def _freshness(db_path: str) -> dict[str, Any]:
+    from ..git import graph_freshness
+
+    with GraphStore(db_path) as store:
+        return {"operation": "freshness", **graph_freshness(store)}
+
+
+def _write_report(db_path: str, output: str) -> dict[str, Any]:
+    markdown = generate_report_markdown(db_path)
+    path = Path(output)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(markdown, encoding="utf-8")
+    return {"operation": "report", "output": str(path), "written": True}
+
+
+def _graph_diff(
+    graph: Graph, db_path: str, params: dict[str, Any]
+) -> dict[str, Any]:
+    with GraphStore(db_path) as store:
+        repo_root = store.get_metadata("repository_root")
+    return graph_diff_json(
+        graph,
+        _base_param(params),
+        str(params.get("head", "HEAD")),
+        _limit_param(params, 50),
+        repo_root,
+    )
+
+
+def _motifs(graph: Graph, params: dict[str, Any]) -> dict[str, Any]:
+    from ....analysis.motifs import (
+        diamond_inheritance_motif,
+        doc_function_triangle,
+        find_motifs,
+        security_audit_motif,
+    )
+
+    built_in = str(params.get("built_in", "security_audit"))
+    factories = {
+        "security_audit": security_audit_motif,
+        "diamond": diamond_inheritance_motif,
+        "doc_triangle": doc_function_triangle,
+    }
+    factory = factories.get(built_in)
+    if factory is None:
+        return {
+            "operation": "motifs",
+            "error": (
+                f"unknown built-in motif {built_in}; expected "
+                "security_audit, diamond, or doc_triangle"
+            ),
+        }
+    matches = find_motifs(graph, factory(), _limit_param(params, 50))
+    return {
+        "operation": "motifs",
+        "built_in": built_in,
+        "match_count": len(matches),
+        "matches": [match.to_dict() for match in matches],
+    }
+
+
+def _dedup(graph: Graph) -> dict[str, Any]:
+    from ....analysis.dedup import deduplicate_nodes
+
+    return {"operation": "dedup", **deduplicate_nodes(graph.clone())}
+
+
+def _patterns(graph: Graph) -> dict[str, Any]:
+    from ....analysis.patterns import detect_patterns
+
+    matches = detect_patterns(graph)
+    return {
+        "operation": "patterns",
+        "patterns": [
+            {
+                "pattern_id": match.pattern_id,
+                "display_name": match.display_name,
+                "framework": match.framework,
+                "category": match.category,
+                "confidence": match.confidence,
+                "matched_nodes": match.matched_nodes,
+                "matched_edges": match.matched_edges,
+            }
+            for match in matches
+        ],
+        "total": len(matches),
+    }
+
+
+def _wiki(graph: Graph, params: dict[str, Any]) -> dict[str, Any]:
+    from ..wiki import _generate_wiki
+
+    output = _required_str(params, "output")
+    result = _generate_wiki(graph, output, bool(params.get("force", False)))
+    return {"operation": "wiki", "output_dir": output, **result}
+
+
 def _status(graph: Graph) -> dict[str, Any]:
     """Status response with graph stats."""
-    call_resolved = 0
-    call_unresolved = 0
-    for _, edge in graph.edges():
-        if edge.kind == EdgeKind.CALLS:
-            if edge.confidence > 0.9:
-                call_resolved += 1
-            else:
-                call_unresolved += 1
+    from ....analysis.structure import call_resolution_stats
 
-    total = call_resolved + call_unresolved
-    rate = (call_resolved / total * 100) if total > 0 else 100.0
+    calls = call_resolution_stats(graph)
 
     return {
         "operation": "status",
         "nodes": graph.node_count(),
         "edges": graph.edge_count(),
         "call_resolution": {
-            "resolved": call_resolved,
-            "unresolved": call_unresolved,
-            "rate": round(rate, 1),
+            "resolved": calls["resolved"],
+            "unresolved": calls["unresolved"],
+            "rate": calls["rate"],
         },
     }
 

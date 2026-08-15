@@ -91,8 +91,9 @@ def _generate_wiki(
 
         content = _generate_community_page(graph, comm)
         filepath = wiki_path / f"{slug}.md"
+        page_existed = filepath.exists()
 
-        if not force and filepath.exists():
+        if not force and page_existed:
             try:
                 existing = filepath.read_text(encoding="utf-8")
                 if existing == content:
@@ -103,12 +104,11 @@ def _generate_wiki(
                 pass
 
         filepath.write_text(content, encoding="utf-8")
-        if filepath.exists():
+        if page_existed:
             pages_updated += 1
-            page_entries.append((slug, comm["name"], comm["size"]))
         else:
             pages_generated += 1
-            page_entries.append((slug, comm["name"], comm["size"]))
+        page_entries.append((slug, comm["name"], comm["size"]))
 
     # Generate index.md
     index_content = _generate_index(communities, page_entries)
@@ -141,24 +141,26 @@ def _generate_wiki(
 
 
 def _compute_communities(graph) -> list[dict[str, Any]]:
-    """Compute communities using Louvain algorithm and group nodes."""
-    from ...analysis.communities import detect_communities, community_quality
+    """Compute communities using Leiden and retain every member."""
+    from collections import defaultdict
 
-    result = detect_communities(graph)
-    communities = result.get("communities", [])
-    quality = community_quality(graph)
+    from ...analysis.communities.core import CommunityOptions
+    from ...analysis.communities.leiden import leiden_with_options
+
+    labels = leiden_with_options(graph, CommunityOptions())
+    communities: dict[int, list] = defaultdict(list)
+    for node_id, community_id in labels.items():
+        communities[community_id].append(node_id)
 
     output = []
-    for comm in communities:
-        node_ids = comm.get("node_ids", [])
-        size = len(node_ids)
-        cohesion = quality.get(comm.get("id", 0), 1.0) if hasattr(quality, "get") else 1.0
+    for community_id, members in communities.items():
+        size = len(members)
 
         # Determine dominant language from member files
         lang_counts: dict[str, int] = {}
         member_qns: list[str] = []
-        for nid in node_ids:
-            node = graph.node(type("N", (), {"value": nid})())
+        for node_id in members:
+            node = graph.node(node_id)
             if node is None:
                 continue
             if node.kind == NodeKind.FILE:
@@ -174,9 +176,9 @@ def _compute_communities(graph) -> list[dict[str, Any]]:
             dominant_lang = max(lang_counts, key=lang_counts.get)
 
         output.append({
-            "name": f"Community {comm.get('id', 0)}",
+            "name": f"Community {community_id}",
             "size": size,
-            "cohesion": float(cohesion),
+            "cohesion": 0.0,
             "dominant_language": dominant_lang,
             "members": member_qns,
         })

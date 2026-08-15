@@ -114,7 +114,8 @@ def _compute_change_risk(graph: Graph, hunk: DiffHunk, affected: list) -> float:
             risk += 2.0
 
         # Check if the symbol has callers
-        callers = list(graph.in_neighbors(NodeId(-1)))  # Would need actual nid
+        nid = graph.find_by_qname(node.qualified_name)
+        callers = list(graph.in_neighbors(nid)) if nid is not None else []
         if callers:
             risk += 0.5
 

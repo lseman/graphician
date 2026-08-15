@@ -166,17 +166,3 @@ def _is_framework_entry(node: Node) -> bool:
         or _is_java_framework_entry(node)
         or _is_generic_event_entry(node)
     )
-
-
-def _is_java_framework_entry(node: Node) -> bool:
-    """Java framework entry detection: Spring, JAX-RS, JUnit, CDI."""
-    annotations = node.properties.get("annotations")
-    if not isinstance(annotations, list):
-        return False
-    all_anns = " ".join(str(a) for a in annotations).lower()
-    java_patterns = {
-        "@controller", "@restcontroller", "@service", "@repository",
-        "@component", "@bean", "@autowired", "@resource",
-        "@test", "@beforeeach", "@aftereach",
-    }
-    return any(p in all_anns for p in java_patterns)

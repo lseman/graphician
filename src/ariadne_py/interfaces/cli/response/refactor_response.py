@@ -21,7 +21,7 @@ def rename_preview_json(graph, target: str, new_name: str) -> dict[str, Any] | N
     Returns:
         Rename preview with edits and stats, or None if target not found.
     """
-    from ...analysis.structure import rename_preview as _rename_preview
+    from ....analysis.structure import rename_preview as _rename_preview
 
     result = _rename_preview(graph, target, new_name)
     if not result:

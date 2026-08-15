@@ -5,6 +5,7 @@ Mirrors the Rust ``paths.rs`` module.
 
 from __future__ import annotations
 
+from collections import deque
 from typing import Any
 
 from ....core.edge import EdgeKind
@@ -35,7 +36,7 @@ def handle_paths(graph, params: dict[str, Any]) -> dict[str, Any]:
 
     # Use find_top_paths from the paths module
     try:
-        from ...analysis.paths import find_top_paths, PathQuery
+        from ....analysis.paths import PathQuery, find_top_paths
 
         paths = find_top_paths(
             graph,
@@ -81,9 +82,9 @@ def _resolve(graph, target: str) -> Any | None:
         return int(target)
     except (ValueError, TypeError):
         pass
-    for _, node in graph.nodes():
+    for node_id, node in graph.nodes():
         if node.qualified_name == target or node.name == target:
-            return node.id if hasattr(node, "id") else None
+            return node_id
     return None
 
 
@@ -107,15 +108,15 @@ def _simple_paths(graph, from_id, to_id, max_hops, limit):
     Returns:
         List of WeightedPath objects.
     """
-    from ...analysis.paths import WeightedPath
+    from ....analysis.paths import WeightedPath
 
     results: list[WeightedPath] = []
     # BFS queue: (current_id, path_nodes, total_cost)
-    queue: list[tuple[Any, list, float]] = [(from_id, [from_id], 0.0)]
+    queue = deque([(from_id, [from_id], 0.0)])
     seen_paths: set[tuple] = set()
 
     while queue and len(results) < limit:
-        current, path_nodes, cost = queue.pop(0)
+        current, path_nodes, cost = queue.popleft()
         depth = len(path_nodes) - 1
 
         if current == to_id and len(path_nodes) > 1:
@@ -140,7 +141,16 @@ def _simple_paths(graph, from_id, to_id, max_hops, limit):
 
             edge_cost = 1.0
             if edge and hasattr(edge, "confidence"):
-                edge_cost = 1.0 / max(edge.confidence, 0.05)
+                confidence = edge.confidence
+                if hasattr(confidence, "score"):
+                    confidence_score = confidence.score()
+                elif isinstance(confidence, (int, float)):
+                    confidence_score = float(confidence)
+                else:
+                    confidence_score = 1.0 if str(confidence) == "extracted" else 0.0
+                if confidence_score <= 0 and getattr(edge, "properties", None):
+                    confidence_score = float(edge.properties.get("score", 0.0))
+                edge_cost = 1.0 / max(confidence_score, 0.05)
             elif edge and hasattr(edge, "kind"):
                 base_costs = {
                     EdgeKind.DEFINES: 0.35,

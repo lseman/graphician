@@ -30,8 +30,8 @@ def _test_coverage_risk(graph: Graph, nid: NodeId) -> float:
     """Compute test coverage risk (0-1)."""
     # Check if tested
     has_test = False
-    for _, src, dst, edge in graph.edges():
-        if edge.kind == EdgeKind.TESTED_BY and dst.value == nid.value:
+    for _, src, _dst, edge in graph.edges():
+        if edge.kind == EdgeKind.TESTED_BY and src.value == nid.value:
             has_test = True
             break
 

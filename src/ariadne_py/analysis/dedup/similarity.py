@@ -18,7 +18,7 @@ def jaro_winkler(s1: str, s2: str) -> float:
     s1_matches = [False] * len1
     s2_matches = [False] * len2
 
-    matches: list[str] = []
+    match_count = 0
     for i in range(len1):
         start = max(0, i - match_distance)
         end = min(i + match_distance + 1, len2)
@@ -27,22 +27,16 @@ def jaro_winkler(s1: str, s2: str) -> float:
                 continue
             s1_matches[i] = True
             s2_matches[j] = True
-            matches.append(s1[i])
+            match_count += 1
             break
 
-    if len(matches) == 0:
+    if match_count == 0:
         return 0.0
 
     # Count transpositions
-    t = 0
-    match_iter = iter(matches)
-    for i in range(len1):
-        if not s1_matches[i]:
-            continue
-        j = next(match_iter)
-        if s1[i] != s2[j]:
-            t += 1
-    t //= 2
+    matched_s1 = [char for char, matched in zip(s1, s1_matches, strict=True) if matched]
+    matched_s2 = [char for char, matched in zip(s2, s2_matches, strict=True) if matched]
+    transpositions = sum(a != b for a, b in zip(matched_s1, matched_s2, strict=True)) / 2
 
     # Count common prefix
     prefix = 0
@@ -53,9 +47,9 @@ def jaro_winkler(s1: str, s2: str) -> float:
             break
 
     jaro = (
-        len1 / (2 * len1)
-        + len2 / (2 * len2)
-        + (len(matches) - t) / len(matches)
+        match_count / len1
+        + match_count / len2
+        + (match_count - transpositions) / match_count
     ) / 3.0
 
     winkler = jaro + prefix * 0.1 * (1 - jaro)

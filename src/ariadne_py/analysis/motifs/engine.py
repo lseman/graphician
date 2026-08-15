@@ -36,6 +36,10 @@ def find_motifs(graph: Graph, motif: Motif, limit: int = 50) -> list[MotifMatch]
         if e.kind is not None:
             pattern_adj.setdefault(e.from_id, []).append((e.to_id, e.kind))
 
+    edge_kinds: dict[tuple[NodeId, NodeId], set[EdgeKind]] = {}
+    for _edge_id, source, target, edge in graph.edges():
+        edge_kinds.setdefault((source, target), set()).add(edge.kind)
+
     # Pre-filter candidates for each pattern node
     candidate_sets: list[list[NodeId]] = []
     for node_constraint in motif.nodes:
@@ -60,7 +64,7 @@ def find_motifs(graph: Graph, motif: Motif, limit: int = 50) -> list[MotifMatch]
         if len(results) >= limit:
             return
         if depth == len(motif.nodes):
-            if _validate_edges(graph, motif, current_map):
+            if _validate_edges(motif, current_map, edge_kinds):
                 edges_out: list[tuple[str, str, str]] = []
                 for e in motif.edges:
                     src_id = current_map.get(e.from_id)
@@ -87,7 +91,11 @@ def find_motifs(graph: Graph, motif: Motif, limit: int = 50) -> list[MotifMatch]
             if any(v == graph_node_id for v in current_map.values()):
                 continue
             if not _check_consistency(
-                graph, pattern_adj, pattern_node_idx, graph_node_id, current_map
+                pattern_adj,
+                pattern_node_idx,
+                graph_node_id,
+                current_map,
+                edge_kinds,
             ):
                 continue
             current_map[pattern_node_idx] = graph_node_id
@@ -99,11 +107,11 @@ def find_motifs(graph: Graph, motif: Motif, limit: int = 50) -> list[MotifMatch]
 
 
 def _check_consistency(
-    graph: Graph,
     pattern_adj: dict[int, list[tuple[int, EdgeKind]]],
     pattern_node_idx: int,
     graph_node_id: NodeId,
     current_map: dict[int, NodeId],
+    edge_kinds: dict[tuple[NodeId, NodeId], set[EdgeKind]],
 ) -> bool:
     """Check consistency of assigning graph_node_id to pattern_node_idx."""
     for assigned_pidx, assigned_gid in current_map.items():
@@ -112,20 +120,18 @@ def _check_consistency(
             or any(t == pattern_node_idx for t, _ in pattern_adj.get(assigned_pidx, []))
         )
         if pattern_has_edge:
-            graph_has_edge = False
-            for _, src, dst, _edge in graph.edges():
-                if (src == assigned_gid and dst == graph_node_id) or (
-                    dst == assigned_gid and src == graph_node_id
-                ):
-                    graph_has_edge = True
-                    break
-            if not graph_has_edge:
+            if (
+                (assigned_gid, graph_node_id) not in edge_kinds
+                and (graph_node_id, assigned_gid) not in edge_kinds
+            ):
                 return False
     return True
 
 
 def _validate_edges(
-    graph: Graph, motif: Motif, current_map: dict[int, NodeId]
+    motif: Motif,
+    current_map: dict[int, NodeId],
+    edge_kinds: dict[tuple[NodeId, NodeId], set[EdgeKind]],
 ) -> bool:
     """Validate that all motif edges exist in the graph for the current mapping."""
     for e in motif.edges:
@@ -133,12 +139,9 @@ def _validate_edges(
         dst_id = current_map.get(e.to_id)
         if src_id is None or dst_id is None:
             return False
-        found = False
-        for _, src, dst, edge in graph.edges():
-            if src == src_id and dst == dst_id:
-                if e.kind is None or edge.kind == e.kind:
-                    found = True
-                    break
-        if not found:
+        kinds = edge_kinds.get((src_id, dst_id), set())
+        if e.kind is not None and e.kind not in kinds:
+            return False
+        if e.kind is None and not kinds:
             return False
     return True

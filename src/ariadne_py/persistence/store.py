@@ -8,23 +8,21 @@ and confidence class tracking.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
-import os
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..core.edge import Edge, EdgeKind, Confidence
+from ..core.edge import Confidence, Edge, EdgeKind
 from ..core.graph import Graph
-from ..core.id import EdgeId, NodeId
+from ..core.id import NodeId
 from ..core.node import Node, NodeKind
 from .embeddings.local import (
     cosine_similarity,
-    encode_embedding,
     embedding_source_text,
+    encode_embedding,
     semantic_embedding,
 )
 
@@ -32,6 +30,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_EMBEDDING_MODEL: str = "ariadne-hash-v2"
 DEFAULT_EMBEDDING_DIM: int = 384
+
+
+class IncompatibleDatabaseError(RuntimeError):
+    """Raised when a database does not use Ariadne's canonical schema."""
 
 
 @dataclass(frozen=True)
@@ -64,67 +66,86 @@ class GraphStore:
     """SQLite-backed graph persistence.
 
     Schema:
-    - nodes: node_id, kind, name, qualified_name, source_uri, line_start,
+    - nodes: id, kind, name, qualified_name, source_uri, line_start,
       line_end, properties, source_text, valid_from, valid_to
-    - edges: edge_id, kind, confidence, properties, valid_from, valid_to,
-      source_id, target_id
-    - file_hashes: file_path, hash
-    - metadata: key, value
+    - edges: id, kind, confidence, properties, valid_from, valid_to,
+      src_id, dst_id
+    - file_state: path, hash, indexed_at_unix
+    - meta: key, value
     """
 
     def __init__(self, db_path: str | Path, read_only: bool = False) -> None:
         self.db_path = Path(db_path)
         flags = sqlite3.URI if str(db_path).startswith("file:") else 0
         self._conn = sqlite3.connect(str(self.db_path), uri=(flags != 0))
+        self._closed = False
         self._conn.row_factory = sqlite3.Row
+        try:
+            reset = self._reset_legacy_python_schema()
+            self._validate_existing_schema()
+        except Exception:
+            self._conn.close()
+            self._closed = True
+            raise
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._init_schema()
-        self._migrate_v1()
+        if reset:
+            self._set_metadata("requires_rebuild", "1")
+            self._conn.commit()
 
-    def _migrate_v1(self) -> None:
-        """Apply schema migrations for older databases.
+    def _reset_legacy_python_schema(self) -> bool:
+        """Destructively replace the retired Python-only database layout."""
+        has_nodes = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='nodes'"
+        ).fetchone()
+        if has_nodes is None:
+            return False
+        columns = {
+            row["name"] for row in self._conn.execute("PRAGMA table_info('nodes')")
+        }
+        if "node_id" not in columns:
+            return False
+        self._conn.executescript("""
+            DROP TABLE IF EXISTS nodes_fts;
+            DROP TABLE IF EXISTS embeddings;
+            DROP TABLE IF EXISTS edges;
+            DROP TABLE IF EXISTS nodes;
+            DROP TABLE IF EXISTS edge_versions;
+            DROP TABLE IF EXISTS node_versions;
+            DROP TABLE IF EXISTS file_state;
+            DROP TABLE IF EXISTS metadata;
+            DROP TABLE IF EXISTS meta;
+            DROP TABLE IF EXISTS graph_snapshots;
+        """)
+        return True
 
-        Migration v1→v2: adds source_text column to nodes and node_versions,
-        and updates schema_version metadata.
-        """
-        try:
-            has_column = self._conn.execute(
-                "SELECT COUNT(*) FROM pragma_table_info('nodes') WHERE name='source_text'"
-            ).fetchone()[0]
-        except Exception:
-            has_column = 0
-        if has_column == 0:
-            try:
-                self._conn.execute("ALTER TABLE nodes ADD COLUMN source_text TEXT")
-            except Exception:
-                pass
-            try:
-                self._conn.execute("ALTER TABLE node_versions ADD COLUMN source_text TEXT")
-            except Exception:
-                pass
-            try:
-                self._conn.execute("UPDATE metadata SET value='2' WHERE key='schema_version'")
-            except Exception:
-                pass
-            self._set_metadata("schema_version", "2")
+    def _validate_existing_schema(self) -> None:
+        """Accept only the canonical Rust Ariadne database layout."""
+        has_nodes = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='nodes'"
+        ).fetchone()
+        if has_nodes is None:
+            return
+        columns = {
+            row["name"] for row in self._conn.execute("PRAGMA table_info('nodes')")
+        }
+        required = {"id", "kind", "name", "qualified_name", "properties"}
+        if not required.issubset(columns):
+            raise IncompatibleDatabaseError(
+                f"{self.db_path} does not use the canonical Rust Ariadne schema"
+            )
 
     def _init_schema(self) -> None:
-        """Create tables if they don't exist."""
+        """Create the canonical Rust-compatible schema."""
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS nodes (
-                node_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                kind TEXT NOT NULL,
-                name TEXT NOT NULL,
-                qualified_name TEXT NOT NULL UNIQUE,
-                source_uri TEXT,
-                line_start INTEGER,
-                line_end INTEGER,
-                properties TEXT NOT NULL DEFAULT '{}',
-                valid_from TEXT,
-                valid_to TEXT,
-                source_text TEXT
+                id INTEGER PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
+                qualified_name TEXT NOT NULL UNIQUE, source_uri TEXT,
+                line_start INTEGER, line_end INTEGER,
+                properties TEXT NOT NULL DEFAULT '{}', valid_from TEXT,
+                valid_to TEXT, source_text TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_nodes_kind ON nodes(kind);
             CREATE INDEX IF NOT EXISTS idx_nodes_qname ON nodes(qualified_name);
@@ -132,105 +153,66 @@ class GraphStore:
             CREATE INDEX IF NOT EXISTS idx_nodes_valid ON nodes(valid_from, valid_to);
 
             CREATE TABLE IF NOT EXISTS edges (
-                edge_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                kind TEXT NOT NULL,
-                confidence REAL NOT NULL DEFAULT 1.0,
-                conf_class TEXT NOT NULL DEFAULT 'extracted',
+                id INTEGER PRIMARY KEY,
+                src_id INTEGER NOT NULL REFERENCES nodes(id),
+                dst_id INTEGER NOT NULL REFERENCES nodes(id),
+                kind TEXT NOT NULL, confidence REAL NOT NULL,
+                conf_class TEXT NOT NULL,
                 properties TEXT NOT NULL DEFAULT '{}',
-                valid_from TEXT,
-                valid_to TEXT,
-                source_id INTEGER NOT NULL,
-                target_id INTEGER NOT NULL,
-                source_qname TEXT NOT NULL,
-                target_qname TEXT NOT NULL
+                valid_from TEXT, valid_to TEXT
             );
-            CREATE INDEX IF NOT EXISTS idx_edges_src ON edges(source_id);
-            CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(target_id);
+            CREATE INDEX IF NOT EXISTS idx_edges_src ON edges(src_id);
+            CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(dst_id);
             CREATE INDEX IF NOT EXISTS idx_edges_kind ON edges(kind);
             CREATE INDEX IF NOT EXISTS idx_edges_valid ON edges(valid_from, valid_to);
 
+            CREATE TABLE IF NOT EXISTS embeddings (
+                node_id INTEGER PRIMARY KEY REFERENCES nodes(id),
+                model TEXT NOT NULL, vector BLOB NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS node_versions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                kind TEXT NOT NULL,
-                name TEXT NOT NULL,
-                qualified_name TEXT NOT NULL,
-                source_uri TEXT,
-                line_start INTEGER,
-                line_end INTEGER,
-                properties TEXT NOT NULL DEFAULT '{}',
-                valid_from TEXT,
-                valid_to TEXT,
-                source_text TEXT
+                id INTEGER PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
+                qualified_name TEXT NOT NULL, source_uri TEXT,
+                line_start INTEGER, line_end INTEGER,
+                properties TEXT NOT NULL DEFAULT '{}', valid_from TEXT,
+                valid_to TEXT, source_text TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_node_versions_qname ON node_versions(qualified_name);
             CREATE INDEX IF NOT EXISTS idx_node_versions_source ON node_versions(source_uri);
             CREATE INDEX IF NOT EXISTS idx_node_versions_valid ON node_versions(valid_from, valid_to);
-
             CREATE TABLE IF NOT EXISTS edge_versions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                src_qname TEXT NOT NULL,
-                dst_qname TEXT NOT NULL,
-                kind TEXT NOT NULL,
-                confidence REAL NOT NULL,
-                conf_class TEXT NOT NULL,
-                properties TEXT NOT NULL DEFAULT '{}',
-                source_uri TEXT,
-                valid_from TEXT,
-                valid_to TEXT
+                id INTEGER PRIMARY KEY, src_qname TEXT NOT NULL,
+                dst_qname TEXT NOT NULL, kind TEXT NOT NULL,
+                confidence REAL NOT NULL, conf_class TEXT NOT NULL,
+                properties TEXT NOT NULL DEFAULT '{}', source_uri TEXT,
+                valid_from TEXT, valid_to TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_edge_versions_src ON edge_versions(src_qname);
             CREATE INDEX IF NOT EXISTS idx_edge_versions_dst ON edge_versions(dst_qname);
             CREATE INDEX IF NOT EXISTS idx_edge_versions_kind ON edge_versions(kind);
             CREATE INDEX IF NOT EXISTS idx_edge_versions_valid ON edge_versions(valid_from, valid_to);
 
-            CREATE TABLE IF NOT EXISTS embeddings (
-                node_id INTEGER PRIMARY KEY,
-                model TEXT NOT NULL,
-                vector BLOB NOT NULL
+            CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY, value TEXT NOT NULL
             );
-
-            -- File state with index timestamp.
             CREATE TABLE IF NOT EXISTS file_state (
-                path TEXT PRIMARY KEY,
-                hash TEXT NOT NULL,
+                path TEXT PRIMARY KEY, hash TEXT NOT NULL,
                 indexed_at_unix INTEGER NOT NULL
             );
+            INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', '2');
 
-            CREATE TABLE IF NOT EXISTS metadata (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
+            CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+                kind, name, qualified_name,
+                tokenize = "unicode61 separators '_' remove_diacritics 1"
             );
 
-            -- Durable snapshots.
             CREATE TABLE IF NOT EXISTS graph_snapshots (
                 snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 label TEXT UNIQUE NOT NULL,
                 created_at TEXT NOT NULL,
                 payload TEXT NOT NULL
             );
-
-            -- FTS5 index for full-text search.
-            CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
-                kind,
-                name,
-                qualified_name
-            );
         """)
-        fts_columns = {
-            row[1] for row in self._conn.execute("PRAGMA table_info(nodes_fts)").fetchall()
-        }
-        expected_columns = {"node_id", "kind", "name", "qualified_name", "source_text"}
-        if fts_columns and fts_columns != expected_columns:
-            self._conn.execute("DROP TABLE nodes_fts")
-        self._conn.execute(
-            """CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
-                node_id UNINDEXED,
-                kind UNINDEXED,
-                name,
-                qualified_name,
-                source_text
-            )"""
-        )
 
     # ── Save graph ───────────────────────────────────────────────────
 
@@ -260,17 +242,13 @@ class GraphStore:
                     src_db = qname_to_db_id.get(src_node.qualified_name)
                     dst_db = qname_to_db_id.get(dst_node.qualified_name)
                     if src_db is not None and dst_db is not None:
-                        self._insert_edge(
-                            edge, src_db, dst_db,
-                            src_node.qualified_name,
-                            dst_node.qualified_name,
-                        )
+                        self._insert_edge(edge, src_db, dst_db)
 
             # Sync FTS5 index from nodes table
             self._conn.execute("DELETE FROM nodes_fts")
             self._conn.execute(
-                "INSERT INTO nodes_fts (node_id, kind, name, qualified_name, source_text) "
-                "SELECT node_id, kind, name, qualified_name, source_text FROM nodes"
+                "INSERT INTO nodes_fts (rowid, kind, name, qualified_name) "
+                "SELECT id, kind, name, qualified_name FROM nodes"
             )
 
             # Update file hashes
@@ -306,7 +284,7 @@ class GraphStore:
         }
         target_qnames = {node.qualified_name for _, node in graph.nodes()}
         removed_node_ids = {
-            int(row["node_id"])
+            int(row["id"])
             for qname, row in existing_nodes.items()
             if qname not in target_qnames
         }
@@ -354,7 +332,7 @@ class GraphStore:
                     db_id = int(cursor.lastrowid)
                     changed_node_ids.add(db_id)
                 else:
-                    db_id = int(existing["node_id"])
+                    db_id = int(existing["id"])
                     stored = (
                         existing["kind"],
                         existing["name"],
@@ -371,7 +349,7 @@ class GraphStore:
                             """UPDATE nodes SET
                                kind=?, name=?, source_uri=?, line_start=?, line_end=?,
                                properties=?, source_text=?, valid_from=?, valid_to=?
-                               WHERE node_id=?""",
+                               WHERE id=?""",
                             (*values, db_id),
                         )
                         changed_node_ids.add(db_id)
@@ -380,8 +358,8 @@ class GraphStore:
             existing_edges: dict[tuple[Any, ...], list[int]] = {}
             for row in self._conn.execute("SELECT * FROM edges").fetchall():
                 key = (
-                    row["source_qname"],
-                    row["target_qname"],
+                    int(row["src_id"]),
+                    int(row["dst_id"]),
                     row["kind"],
                     float(row["confidence"]),
                     row["conf_class"],
@@ -389,7 +367,7 @@ class GraphStore:
                     row["valid_from"],
                     row["valid_to"],
                 )
-                existing_edges.setdefault(key, []).append(int(row["edge_id"]))
+                existing_edges.setdefault(key, []).append(int(row["id"]))
 
             for _, src, dst, edge in graph.edges():
                 src_node = graph.node(src)
@@ -400,8 +378,8 @@ class GraphStore:
                 conf_class = _confidence_class_name(edge.confidence)
                 properties = json.dumps(edge.properties)
                 key = (
-                    src_node.qualified_name,
-                    dst_node.qualified_name,
+                    qname_to_db_id[src_node.qualified_name],
+                    qname_to_db_id[dst_node.qualified_name],
                     edge.kind.value,
                     confidence,
                     conf_class,
@@ -417,8 +395,6 @@ class GraphStore:
                     edge,
                     qname_to_db_id[src_node.qualified_name],
                     qname_to_db_id[dst_node.qualified_name],
-                    src_node.qualified_name,
-                    dst_node.qualified_name,
                 )
 
             stale_edge_ids = [
@@ -426,14 +402,14 @@ class GraphStore:
             ]
             if stale_edge_ids:
                 self._conn.executemany(
-                    "DELETE FROM edges WHERE edge_id=?",
+                    "DELETE FROM edges WHERE id=?",
                     [(edge_id,) for edge_id in stale_edge_ids],
                 )
 
             invalidated_ids = changed_node_ids | removed_node_ids
             if invalidated_ids:
                 self._conn.executemany(
-                    "DELETE FROM nodes_fts WHERE node_id=?",
+                    "DELETE FROM nodes_fts WHERE rowid=?",
                     [(node_id,) for node_id in invalidated_ids],
                 )
                 self._conn.executemany(
@@ -443,7 +419,7 @@ class GraphStore:
 
             if removed_node_ids:
                 self._conn.executemany(
-                    "DELETE FROM nodes WHERE node_id=?",
+                    "DELETE FROM nodes WHERE id=?",
                     [(node_id,) for node_id in removed_node_ids],
                 )
 
@@ -451,9 +427,9 @@ class GraphStore:
                 placeholders = ",".join("?" for _ in changed_node_ids)
                 self._conn.execute(
                     f"""INSERT INTO nodes_fts
-                        (node_id, kind, name, qualified_name, source_text)
-                        SELECT node_id, kind, name, qualified_name, source_text
-                        FROM nodes WHERE node_id IN ({placeholders})""",
+                        (rowid, kind, name, qualified_name)
+                        SELECT id, kind, name, qualified_name
+                        FROM nodes WHERE id IN ({placeholders})""",
                     tuple(sorted(changed_node_ids)),
                 )
 
@@ -478,9 +454,9 @@ class GraphStore:
             return
         placeholders = ",".join("?" for _ in node_ids)
         rows = self._conn.execute(
-            f"""SELECT node_id, kind, name, qualified_name, source_uri, source_text
+            f"""SELECT id, kind, name, qualified_name, source_uri, source_text
                 FROM nodes
-                WHERE node_id IN ({placeholders})
+                WHERE id IN ({placeholders})
                   AND qualified_name NOT LIKE 'call::%'""",
             tuple(sorted(node_ids)),
         ).fetchall()
@@ -489,7 +465,7 @@ class GraphStore:
                 "INSERT OR REPLACE INTO embeddings (node_id, model, vector) VALUES (?, ?, ?)",
                 [
                     (
-                        row["node_id"],
+                        row["id"],
                         DEFAULT_EMBEDDING_MODEL,
                         encode_embedding(
                             semantic_embedding(
@@ -531,17 +507,17 @@ class GraphStore:
         if node_id is None:
             # Node already exists (same qualified_name)
             row = self._conn.execute(
-                "SELECT node_id FROM nodes WHERE qualified_name = ?",
+                "SELECT id FROM nodes WHERE qualified_name = ?",
                 (node.qualified_name,),
             ).fetchone()
-            node_id = row["node_id"] if row else 0
+            node_id = row["id"] if row else 0
 
         # Update the node
         self._conn.execute(
             """UPDATE nodes SET
                kind=?, name=?, source_uri=?, line_start=?, line_end=?,
                properties=?, source_text=?, valid_from=?, valid_to=?
-               WHERE node_id=?""",
+               WHERE id=?""",
             (
                 node.kind.value,
                 node.name,
@@ -563,16 +539,14 @@ class GraphStore:
         edge: Edge,
         src_db_id: int,
         dst_db_id: int,
-        source_qname: str,
-        target_qname: str,
     ) -> None:
         """Insert an edge."""
         conf_class = edge.confidence.class_name() if hasattr(edge.confidence, 'class_name') else _confidence_class_name(edge.confidence)
         conf_score = edge.confidence.score() if hasattr(edge.confidence, 'score') else 1.0
         self._conn.execute(
             """INSERT INTO edges
-               (kind, confidence, conf_class, properties, valid_from, valid_to, source_id, target_id, source_qname, target_qname)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (kind, confidence, conf_class, properties, valid_from, valid_to, src_id, dst_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 edge.kind.value,
                 conf_score,
@@ -582,8 +556,6 @@ class GraphStore:
                 edge.valid_to,
                 src_db_id,
                 dst_db_id,
-                source_qname,
-                target_qname,
             ),
         )
 
@@ -593,23 +565,21 @@ class GraphStore:
         """Load a graph from the database."""
         graph = Graph()
 
-        # Load nodes, build qname → NodeId mapping
-        qname_to_id: dict[str, NodeId] = {}
+        # Load nodes and map database IDs to in-memory IDs.
+        database_to_id: dict[int, NodeId] = {}
         rows = self._conn.execute("SELECT * FROM nodes").fetchall()
         for row in rows:
             node = self._row_to_node(row)
             nid = graph.add_node(node)
-            qname_to_id[node.qualified_name] = nid
+            database_to_id[int(row["id"])] = nid
 
         # Load edges using qname mapping
         edge_rows = self._conn.execute("SELECT * FROM edges").fetchall()
         for row in edge_rows:
             edge = self._edge_row_to_edge(row)
-            src_qn = row["source_qname"]
-            dst_qn = row["target_qname"]
-            src_id = qname_to_id.get(src_qn)
-            dst_id = qname_to_id.get(dst_qn)
-            if src_id and dst_id:
+            src_id = database_to_id.get(int(row["src_id"]))
+            dst_id = database_to_id.get(int(row["dst_id"]))
+            if src_id is not None and dst_id is not None:
                 graph.add_edge(src_id, dst_id, edge)
 
         logger.info("Loaded graph: %d nodes, %d edges", graph.node_count(), graph.edge_count())
@@ -691,15 +661,13 @@ class GraphStore:
 
     def get_metadata(self, key: str) -> str | None:
         """Get a metadata value."""
-        row = self._conn.execute(
-            "SELECT value FROM metadata WHERE key = ?", (key,)
-        ).fetchone()
+        row = self._conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else None
 
     def _set_metadata(self, key: str, value: str) -> None:
         """Set a metadata value."""
         self._conn.execute(
-            "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
             (key, value),
         )
 
@@ -775,7 +743,7 @@ class GraphStore:
         # Map node_id back to qualified_name
         node_map: dict[int, str] = {}
         for node_id, qname in self._conn.execute(
-            "SELECT node_id, qualified_name FROM nodes"
+            "SELECT id, qualified_name FROM nodes"
         ).fetchall():
             node_map[node_id] = qname
 
@@ -805,6 +773,10 @@ class GraphStore:
             return None
         return (row["cnt"], row["model"])
 
+    def embedding_stats(self) -> tuple[int, str | None]:
+        """Rust-compatible embedding statistics alias."""
+        return self.get_embedding_stats() or (0, None)
+
     # ── Status ───────────────────────────────────────────────────────
 
     def status(self) -> dict[str, Any]:
@@ -833,8 +805,8 @@ class GraphStore:
         with self._conn:
             self._conn.execute("DELETE FROM nodes_fts")
             self._conn.execute(
-                "INSERT INTO nodes_fts (node_id, kind, name, qualified_name, source_text) "
-                "SELECT node_id, kind, name, qualified_name, source_text FROM nodes"
+                "INSERT INTO nodes_fts (rowid, kind, name, qualified_name) "
+                "SELECT id, kind, name, qualified_name FROM nodes"
             )
         return int(self._conn.execute("SELECT COUNT(*) FROM nodes_fts").fetchone()[0])
 
@@ -868,7 +840,7 @@ class GraphStore:
             sql = (
                 "SELECT n.qualified_name, bm25(nodes_fts) "
                 "FROM nodes_fts "
-                "JOIN nodes n ON nodes_fts.node_id = n.node_id "
+                "JOIN nodes n ON nodes_fts.rowid = n.id "
                 "WHERE nodes_fts MATCH ? "
                 "ORDER BY bm25(nodes_fts) "
                 "LIMIT ?"
@@ -924,8 +896,8 @@ class GraphStore:
             "e.conf_class, e.properties, e.valid_from, e.valid_to, "
             "COALESCE(s.source_uri, d.source_uri) "
             "FROM edges e "
-            "JOIN nodes s ON e.source_id = s.node_id "
-            "JOIN nodes d ON e.target_id = d.node_id "
+            "JOIN nodes s ON e.src_id = s.id "
+            "JOIN nodes d ON e.dst_id = d.id "
             "UNION ALL "
             "SELECT src_qname, dst_qname, kind, confidence, conf_class, "
             "properties, valid_from, valid_to, source_uri "
@@ -1100,8 +1072,8 @@ class GraphStore:
             "e.conf_class, e.properties, e.valid_from, e.valid_to, "
             "COALESCE(s.source_uri, d.source_uri) "
             "FROM edges e "
-            "JOIN nodes s ON e.source_id = s.node_id "
-            "JOIN nodes d ON e.target_id = d.node_id "
+            "JOIN nodes s ON e.src_id = s.id "
+            "JOIN nodes d ON e.dst_id = d.id "
             "WHERE s.source_uri = ? OR d.source_uri = ?"
         )
         for source in sources:
@@ -1140,18 +1112,18 @@ class GraphStore:
             for source in sources:
                 self._conn.execute(
                     "DELETE FROM edges "
-                    "WHERE source_id IN (SELECT node_id FROM nodes WHERE source_uri = ?) "
-                    "   OR target_id IN (SELECT node_id FROM nodes WHERE source_uri = ?)",
+                    "WHERE src_id IN (SELECT id FROM nodes WHERE source_uri = ?) "
+                    "   OR dst_id IN (SELECT id FROM nodes WHERE source_uri = ?)",
                     (source, source),
                 )
                 self._conn.execute(
-                    "DELETE FROM nodes_fts WHERE node_id IN "
-                    "(SELECT node_id FROM nodes WHERE source_uri = ?)",
+                    "DELETE FROM nodes_fts WHERE rowid IN "
+                    "(SELECT id FROM nodes WHERE source_uri = ?)",
                     (source,),
                 )
                 self._conn.execute(
                     "DELETE FROM embeddings WHERE node_id IN "
-                    "(SELECT node_id FROM nodes WHERE source_uri = ?)",
+                    "(SELECT id FROM nodes WHERE source_uri = ?)",
                     (source,),
                 )
                 self._conn.execute(
@@ -1197,7 +1169,7 @@ class GraphStore:
         rows = self._conn.execute(
             "SELECT n.qualified_name, e.vector "
             "FROM embeddings e "
-            "JOIN nodes n ON e.node_id = n.node_id "
+            "JOIN nodes n ON e.node_id = n.id "
             "WHERE n.qualified_name NOT LIKE 'call::%'"
         ).fetchall()
 
@@ -1224,10 +1196,9 @@ class GraphStore:
         Mirrors the Rust ``rebuild_embeddings``.
         """
         from ..persistence.embeddings.local import (
-            decode_embedding,
             embedding_source_text,
-            semantic_embedding,
             encode_embedding,
+            semantic_embedding,
         )
 
         nodes_data = self._fetch_embeddable_nodes()
@@ -1238,7 +1209,7 @@ class GraphStore:
                 "INSERT INTO embeddings (node_id, model, vector) VALUES (?, ?, ?)",
                 [
                     (
-                        row["node_id"],
+                        row["id"],
                         DEFAULT_EMBEDDING_MODEL,
                         encode_embedding(
                             semantic_embedding(
@@ -1330,11 +1301,11 @@ class GraphStore:
     def _fetch_embeddable_nodes(self) -> list[sqlite3.Row]:
         """Fetch node data for embedding generation.
 
-        Returns rows with columns: node_id, kind, name, qualified_name,
+        Returns rows with columns: id, kind, name, qualified_name,
         source_uri, source_text. Mirrors the Rust ``fetch_embeddable_nodes``.
         """
         return self._conn.execute(
-            "SELECT node_id, kind, name, qualified_name, source_uri, source_text "
+            "SELECT id, kind, name, qualified_name, source_uri, source_text "
             "FROM nodes WHERE qualified_name NOT LIKE 'call::%'"
         ).fetchall()
 
@@ -1360,14 +1331,27 @@ class GraphStore:
         conn.execute("PRAGMA foreign_keys=ON")
         store = GraphStore.__new__(GraphStore)
         store._conn = conn
+        store._closed = False
         store.db_path = Path(":memory:")
         store._init_schema()
-        store._migrate_v1()
         return store
 
     def close(self) -> None:
         """Close the database connection."""
-        self._conn.close()
+        if not getattr(self, "_closed", True):
+            self._conn.close()
+            self._closed = True
+
+    def __del__(self) -> None:
+        """Best-effort safety net for abandoned stores.
+
+        Callers should still use ``with GraphStore(...)`` or ``close()``;
+        this prevents SQLite connections from leaking when ownership is lost.
+        """
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def __enter__(self) -> GraphStore:
         return self
@@ -1376,11 +1360,11 @@ class GraphStore:
         self.close()
 
     def _resolve_qname(self, qname: str) -> int | None:
-        """Resolve a qualified name to a node_id."""
+        """Resolve a qualified name to its database ID."""
         row = self._conn.execute(
-            "SELECT node_id FROM nodes WHERE qualified_name = ?", (qname,)
+            "SELECT id FROM nodes WHERE qualified_name = ?", (qname,)
         ).fetchone()
-        return row["node_id"] if row else None
+        return row["id"] if row else None
 
 
 def _now_iso() -> str:

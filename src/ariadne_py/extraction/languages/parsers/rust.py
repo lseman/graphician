@@ -52,8 +52,12 @@ def _add_node(
     node = node.with_source(str(path), line_start + 1, line_end + 1)
     if source is not None:
         node = node.with_source_text(source)
+    # Default dialect for Rust
+    default_props = {"dialect": "rust"}
     if props:
-        for k, v in props.items():
+        default_props.update(props)
+    if default_props:
+        for k, v in default_props.items():
             node = node.with_property(k, v)
     graph.add_node(node)
     result = graph.find_by_qname(qn)
@@ -385,53 +389,34 @@ def _walk_enum_fields(
                 graph.add_edge(var_id, field_id, Edge.extracted(EdgeKind.DEFINES))
 
 
-def _walk_impl_body(
+def _link_impl_methods(
     graph: Graph,
     file_qn: str,
     impl_id: NodeId,
     body: ts.Node,
-    impl_node: ts.Node,
 ) -> None:
-    """Walk an impl body for methods and call edges."""
-    # Determine impl context for QN scoping
-    impl_type = None
-    trait_name = None
-    for i, c in enumerate(impl_node.children):
-        fn = impl_node.field_name_for_child(i)
-        if fn == "type" and c.type in ("type_identifier", "scoped_type_identifier"):
-            impl_type = _text(c).split("<")[0].strip()
-        elif fn == "trait":
-            trait_name = _text(c)
+    """Link an impl block to its methods.
 
-    if trait_name:
-        impl_scope = f"{impl_type}::{trait_name}::impl"
-    else:
-        impl_scope = f"{impl_type}::impl"
-
+    Methods themselves are already created (with correct path, qname, and
+    call edges) by the top-level function_item query in extract_file; this
+    only adds the impl -> method DEFINES edge for graph navigation.
+    """
     for child in body.children:
         if child.type == "function_item":
             name_node = child.child_by_field_name("name")
             if not name_node:
                 continue
+            scope = _rust_scope(child)
             name = _text(name_node)
-            qn = f"{file_qn}::{impl_scope}::{name}"
-            is_test = _has_test_attr(child)
-            fn_props: dict[str, Any] = {"is_test": is_test} if is_test else {}
-            fn_text = child.text.decode("utf-8", errors="replace") if child.text else ""
-            fn_id = _add_node(graph, NodeKind.METHOD, qn, Path(""),
-                              child.start_point.row, child.end_point.row,
-                              fn_text, fn_props)
-            if fn_id is None:
-                continue
-            graph.add_edge(impl_id, fn_id, Edge.extracted(EdgeKind.DEFINES))
-
-            # Walk method body for calls
-            fn_body = child.child_by_field_name("body")
-            if fn_body:
-                _emit_calls_in_body(graph, fn_id, fn_body)
+            qn = f"{file_qn}::{'::'.join(scope)}::{name}" if scope else f"{file_qn}::{name}"
+            fn_id = graph.find_by_qname(qn)
+            if fn_id is not None:
+                graph.add_edge(impl_id, fn_id, Edge.extracted(EdgeKind.DEFINES))
 
 
-def extract_file(path: Path, graph: Graph, *, file_qn: str | None = None) -> None:
+def extract_file(
+    path: Path, graph: Graph, *, file_qn: str | None = None, source_path: Path | None = None
+) -> None:
     with open(path, "rb") as f:
         raw = f.read()
     source = raw.decode("utf-8", errors="replace")
@@ -443,6 +428,8 @@ def extract_file(path: Path, graph: Graph, *, file_qn: str | None = None) -> Non
     root = tree.root_node
 
     file_qn = file_qn or path.stem
+    record_path = source_path if source_path is not None else path
+    path = record_path
     file_id = _add_node(graph, NodeKind.FILE, file_qn, path, 0, 0, source)
 
     # Pre-compute #[cfg(test)] mod ranges for test detection.
@@ -589,10 +576,10 @@ def extract_file(path: Path, graph: Graph, *, file_qn: str | None = None) -> Non
             if trait_id is not None:
                 graph.add_edge(impl_id, trait_id, Edge.extracted(EdgeKind.IMPLEMENTS))
 
-        # Walk impl body for methods and calls
+        # Link impl block to its already-extracted methods
         body = def_node.child_by_field_name("body")
         if body:
-            _walk_impl_body(graph, file_qn, impl_id, body, def_node)
+            _link_impl_methods(graph, file_qn, impl_id, body)
 
     # Use declarations (imports)
     use_q = ts.Query(language, r"(use_declaration argument: (_) @path) @use")

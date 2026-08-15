@@ -55,8 +55,11 @@ def _add_node(
     node = node.with_source(str(path), line_start + 1, line_end + 1)
     if source is not None:
         node = node.with_source_text(source)
+    default_props = {"dialect": "typescript"}
     if props:
-        for k, v in props.items():
+        default_props.update(props)
+    if default_props:
+        for k, v in default_props.items():
             node = node.with_property(k, v)
     graph.add_node(node)
     return graph.find_by_qname(qn)
@@ -103,27 +106,23 @@ def _emit_call_expr(
     caller_id: NodeId,
 ) -> None:
     """Emit a call edge from a call_expression node."""
-    func_node = None
-    for c in node.children:
-        if c.child_by_field_name("function") is not None:
-            func_node = c
-            break
+    func_node = node.child_by_field_name("function")
     if func_node is None:
         func_node = node.children[0] if node.children else None
     if func_node is None:
         return
 
     name = None
+    receiver = None
     if func_node.type == "identifier":
         name = _text(func_node)
     elif func_node.type == "property_identifier":
         name = _text(func_node)
     elif func_node.type == "member_expression":
-        prop = None
-        for c in func_node.children:
-            if c.child_by_field_name("property") is not None:
-                prop = c
-                break
+        obj = func_node.child_by_field_name("object")
+        if obj:
+            receiver = _text(obj)
+        prop = func_node.child_by_field_name("property")
         if prop:
             name = _text(prop)
     elif func_node.type == "parenthesized_expression":
@@ -136,10 +135,14 @@ def _emit_call_expr(
         callee_qn = f"call::{name}"
         callee_id = _add_node(graph, NodeKind.FUNCTION, callee_qn, Path(""), 0, 0)
         edge = Edge.ambiguous(EdgeKind.CALLS)
+        if receiver:
+            edge = edge.with_property("call_receiver", receiver)
         graph.add_edge(caller_id, callee_id, edge)
 
 
-def extract_file(path: Path, graph: Graph) -> None:
+def extract_file(
+    path: Path, graph: Graph, *, file_qn: str | None = None, source_path: Path | None = None
+) -> None:
     """Parse a TypeScript source file and emit nodes/edges into the graph."""
     with open(path, "rb") as f:
         raw = f.read()
@@ -151,11 +154,12 @@ def extract_file(path: Path, graph: Graph) -> None:
     tree = parser.parse(raw)
     root = tree.root_node
 
-    file_qn = path.stem
-    file_id = _add_node(graph, NodeKind.FILE, file_qn, path, 0, 0, source)
+    record_path = source_path if source_path is not None else path
+    file_qn = file_qn or path.stem
+    file_id = _add_node(graph, NodeKind.FILE, file_qn, record_path, 0, 0, source)
 
     # Walk top-level definitions (includes imports/exports)
-    _walk_body(root, source, graph, file_qn, file_id, [])
+    _walk_body(root, source, graph, file_qn, record_path, file_id, [])
 
 
 def _walk_body(
@@ -163,6 +167,7 @@ def _walk_body(
     source: str,
     graph: Graph,
     file_qn: str,
+    path: Path,
     parent_id: NodeId,
     scope: list[str],
 ) -> None:
@@ -172,19 +177,19 @@ def _walk_body(
             _handle_import(child, source, graph, parent_id)
         elif child.type == "export_statement":
             _handle_export(child, source, graph, parent_id)
-            _walk_body(child, source, graph, file_qn, parent_id, scope)
+            _walk_body(child, source, graph, file_qn, path, parent_id, scope)
         elif child.type == "function_declaration":
-            _handle_function(child, source, graph, file_qn, parent_id, scope, False)
+            _handle_function(child, source, graph, file_qn, path, parent_id, scope, False)
         elif child.type == "class_declaration":
-            _handle_class(child, source, graph, file_qn, parent_id, scope)
+            _handle_class(child, source, graph, file_qn, path, parent_id, scope)
         elif child.type == "interface_declaration":
-            _handle_interface(child, source, graph, file_qn, parent_id, scope)
+            _handle_interface(child, source, graph, file_qn, path, parent_id, scope)
         elif child.type == "type_alias_declaration":
-            _handle_type_alias(child, source, graph, file_qn, parent_id, scope)
+            _handle_type_alias(child, source, graph, file_qn, path, parent_id, scope)
         elif child.type == "enum_declaration":
-            _handle_enum(child, source, graph, file_qn, parent_id, scope)
+            _handle_enum(child, source, graph, file_qn, path, parent_id, scope)
         elif child.type == "lexical_declaration":
-            _handle_lexical_decl(child, source, graph, file_qn, parent_id, scope)
+            _handle_lexical_decl(child, source, graph, file_qn, path, parent_id, scope)
 
 
 def _handle_import(node: ts.Node, source: str, graph: Graph, file_id: NodeId) -> None:
@@ -214,6 +219,7 @@ def _handle_function(
     source: str,
     graph: Graph,
     file_qn: str,
+    path: Path,
     parent_id: NodeId,
     scope: list[str],
     parent_is_class: bool,
@@ -233,7 +239,7 @@ def _handle_function(
         props["decorators"] = decorators
 
     kind = NodeKind.METHOD if parent_is_class else NodeKind.FUNCTION
-    fn_id = _add_node(graph, kind, qn, Path(""),
+    fn_id = _add_node(graph, kind, qn, path,
                       node.start_point.row, node.end_point.row,
                       _text(node), props)
     graph.add_edge(parent_id, fn_id, Edge.extracted(EdgeKind.DEFINES))
@@ -242,7 +248,7 @@ def _handle_function(
     body = node.child_by_field_name("body")
     if body:
         _emit_calls(body, source, graph, fn_id)
-        _walk_body(body, source, graph, file_qn, fn_id, child_scope)
+        _walk_body(body, source, graph, file_qn, path, fn_id, child_scope)
 
 
 def _handle_class(
@@ -250,6 +256,7 @@ def _handle_class(
     source: str,
     graph: Graph,
     file_qn: str,
+    path: Path,
     parent_id: NodeId,
     scope: list[str],
 ) -> None:
@@ -267,7 +274,7 @@ def _handle_class(
     if decorators:
         props["decorators"] = decorators
 
-    class_id = _add_node(graph, NodeKind.CLASS, qn, Path(""),
+    class_id = _add_node(graph, NodeKind.CLASS, qn, path,
                          node.start_point.row, node.end_point.row,
                          _text(node), props)
     graph.add_edge(parent_id, class_id, Edge.extracted(EdgeKind.DEFINES))
@@ -293,7 +300,7 @@ def _handle_class(
     # Walk class body
     body = node.child_by_field_name("body")
     if body:
-        _walk_class_body(body, source, graph, file_qn, class_id, child_scope)
+        _walk_class_body(body, source, graph, file_qn, path, class_id, child_scope)
 
 
 def _walk_class_body(
@@ -301,15 +308,16 @@ def _walk_class_body(
     source: str,
     graph: Graph,
     file_qn: str,
+    path: Path,
     parent_id: NodeId,
     scope: list[str],
 ) -> None:
     """Walk a class body and emit methods."""
     for child in _children(node):
         if child.type == "method_definition":
-            _handle_method(child, source, graph, file_qn, parent_id, scope)
+            _handle_method(child, source, graph, file_qn, path, parent_id, scope)
         elif child.type == "class_declaration":
-            _handle_class(child, source, graph, file_qn, parent_id, scope)
+            _handle_class(child, source, graph, file_qn, path, parent_id, scope)
 
 
 def _handle_method(
@@ -317,6 +325,7 @@ def _handle_method(
     source: str,
     graph: Graph,
     file_qn: str,
+    path: Path,
     parent_id: NodeId,
     scope: list[str],
 ) -> None:
@@ -334,7 +343,7 @@ def _handle_method(
     if decorators:
         props["decorators"] = decorators
 
-    method_id = _add_node(graph, NodeKind.METHOD, qn, Path(""),
+    method_id = _add_node(graph, NodeKind.METHOD, qn, path,
                           node.start_point.row, node.end_point.row,
                           _text(node), props)
     graph.add_edge(parent_id, method_id, Edge.extracted(EdgeKind.DEFINES))
@@ -350,6 +359,7 @@ def _handle_interface(
     source: str,
     graph: Graph,
     file_qn: str,
+    path: Path,
     parent_id: NodeId,
     scope: list[str],
 ) -> None:
@@ -362,7 +372,7 @@ def _handle_interface(
     child_scope = scope + [name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
-    iface_id = _add_node(graph, NodeKind.TRAIT, qn, Path(""),
+    iface_id = _add_node(graph, NodeKind.TRAIT, qn, path,
                          node.start_point.row, node.end_point.row,
                          _text(node))
     graph.add_edge(parent_id, iface_id, Edge.extracted(EdgeKind.DEFINES))
@@ -380,7 +390,7 @@ def _handle_interface(
     # Walk interface body
     body = node.child_by_field_name("body")
     if body:
-        _walk_body(body, source, graph, file_qn, iface_id, child_scope)
+        _walk_body(body, source, graph, file_qn, path, iface_id, child_scope)
 
 
 def _handle_type_alias(
@@ -388,6 +398,7 @@ def _handle_type_alias(
     source: str,
     graph: Graph,
     file_qn: str,
+    path: Path,
     parent_id: NodeId,
     scope: list[str],
 ) -> None:
@@ -400,7 +411,7 @@ def _handle_type_alias(
     child_scope = scope + [name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
-    _add_node(graph, NodeKind.TYPE, qn, Path(""),
+    _add_node(graph, NodeKind.TYPE, qn, path,
               node.start_point.row, node.end_point.row,
               _text(node))
     graph.add_edge(parent_id, graph.find_by_qname(qn),
@@ -412,6 +423,7 @@ def _handle_enum(
     source: str,
     graph: Graph,
     file_qn: str,
+    path: Path,
     parent_id: NodeId,
     scope: list[str],
 ) -> None:
@@ -424,7 +436,7 @@ def _handle_enum(
     child_scope = scope + [name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
-    enum_id = _add_node(graph, NodeKind.TYPE, qn, Path(""),
+    enum_id = _add_node(graph, NodeKind.TYPE, qn, path,
                         node.start_point.row, node.end_point.row,
                         _text(node))
     graph.add_edge(parent_id, enum_id, Edge.extracted(EdgeKind.DEFINES))
@@ -437,7 +449,7 @@ def _handle_enum(
                 member_name = member.child_by_field_name("name")
                 if member_name:
                     member_qn = f"{qn}::{_text(member_name)}"
-                    _add_node(graph, NodeKind.VARIABLE, member_qn, Path(""),
+                    _add_node(graph, NodeKind.VARIABLE, member_qn, path,
                               member.start_point.row, member.end_point.row)
                     graph.add_edge(enum_id, graph.find_by_qname(member_qn),
                                    Edge.extracted(EdgeKind.DEFINES))
@@ -448,6 +460,7 @@ def _handle_lexical_decl(
     source: str,
     graph: Graph,
     file_qn: str,
+    path: Path,
     parent_id: NodeId,
     scope: list[str],
 ) -> None:
@@ -463,7 +476,7 @@ def _handle_lexical_decl(
             qn = f"{file_qn}::{'::'.join(child_scope)}"
 
             if init and init.type == "arrow_function":
-                fn_id = _add_node(graph, NodeKind.FUNCTION, qn, Path(""),
+                fn_id = _add_node(graph, NodeKind.FUNCTION, qn, path,
                                   init.start_point.row, init.end_point.row,
                                   _text(init))
                 graph.add_edge(parent_id, fn_id, Edge.extracted(EdgeKind.DEFINES))

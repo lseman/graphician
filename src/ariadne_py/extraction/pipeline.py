@@ -78,6 +78,28 @@ DOCUMENT_SUFFIXES = {".md", ".markdown", ".html", ".htm", ".svg"}
 MANIFEST_NAMES = {"package.json", "pyproject.toml", "cargo.toml", "setup.py", "setup.cfg"}
 
 
+def _dedicated_extractors() -> dict[Language, Any]:
+    """Grammar-correct per-language extractors, replacing the generic walker."""
+    from .languages.parsers.cpp import extract_file as extract_cpp
+    from .languages.parsers.java import extract_file as extract_java
+    from .languages.parsers.javascript import extract_file as extract_javascript
+    from .languages.parsers.python import extract_file as extract_python
+    from .languages.parsers.rust import extract_file as extract_rust
+    from .languages.parsers.typescript import extract_file as extract_typescript
+
+    return {
+        Language.PYTHON: extract_python,
+        Language.JAVASCRIPT: extract_javascript,
+        Language.TYPESCRIPT: extract_typescript,
+        Language.JAVA: extract_java,
+        Language.CPP: extract_cpp,
+        Language.RUST: extract_rust,
+    }
+
+
+_DEDICATED_EXTRACTORS: dict[Language, Any] = _dedicated_extractors()
+
+
 class ExtractionPipeline:
     """Main extraction pipeline.
 
@@ -308,17 +330,16 @@ class ExtractionPipeline:
         file_hash = hashlib.sha256(source.encode()).hexdigest()
         file_key = f"file::{rel_path}"
 
-        # Rust needs its specialized extractor: the generic walker does not
-        # understand function_item, trait_item, impl_item, use trees, or raw
-        # macro token trees. Keep the pipeline's path-qualified file key so
-        # equal stems in different directories cannot collide.
-        if spec.name is Language.RUST:
-            from .languages.parsers.rust import extract_file as extract_rust
-
-            extract_rust(file_path, self.graph, file_qn=file_key)
+        # Each language has a dedicated tree-sitter extractor with grammar-
+        # correct symbol, call, import, and inheritance handling. Pass the
+        # pipeline's path-qualified file key so equal stems in different
+        # directories cannot collide when fragments are merged.
+        extractor = _DEDICATED_EXTRACTORS.get(spec.name)
+        if extractor is not None:
+            extractor(file_path, self.graph, file_qn=file_key, source_path=rel_path)
             return
 
-        # Create file node
+        # Fallback generic walker for languages without a dedicated extractor.
         file_node = Node.new(NodeKind.FILE, file_key)
         file_node = file_node.with_source(
             str(rel_path), 0, source.count("\n") + 1

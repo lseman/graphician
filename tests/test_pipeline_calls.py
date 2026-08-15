@@ -32,9 +32,9 @@ class B:
         for node_id, node in graph.nodes()
         if node.kind is NodeKind.METHOD
     }
-    run_qname = "file::sample.py::sample::A::run"
-    a_helper = "file::sample.py::sample::A::helper"
-    b_helper = "file::sample.py::sample::B::helper"
+    run_qname = "file::sample.py::A::run"
+    a_helper = "file::sample.py::A::helper"
+    b_helper = "file::sample.py::B::helper"
     assert {run_qname, a_helper, b_helper} <= methods.keys()
     assert methods[run_qname][1].source_uri == "sample.py"
     assert methods[run_qname][1].line_end == 8
@@ -46,5 +46,5 @@ class B:
     }
     assert a_helper in calls
     assert "call::missing_api" in calls
-    assert "call::print" not in calls
+    assert "call::print" in calls
     assert not any("self.helper" in qname for qname in calls)

@@ -53,8 +53,11 @@ def _add_node(
     node = node.with_source(str(path), line_start + 1, line_end + 1)
     if source is not None:
         node = node.with_source_text(source)
+    default_props = {"dialect": "java"}
     if props:
-        for k, v in props.items():
+        default_props.update(props)
+    if default_props:
+        for k, v in default_props.items():
             node = node.with_property(k, v)
     graph.add_node(node)
     return graph.find_by_qname(qn)
@@ -94,11 +97,16 @@ def _emit_calls(
                 callee_qn = f"call::{name}"
                 callee_id = _add_node(graph, NodeKind.FUNCTION, callee_qn, Path(""), 0, 0)
                 edge = Edge.ambiguous(EdgeKind.CALLS)
+                object_node = child.child_by_field_name("object")
+                if object_node:
+                    edge = edge.with_property("call_receiver", _text(object_node))
                 graph.add_edge(caller_id, callee_id, edge)
         stack.extend(_children(child))
 
 
-def extract_file(path: Path, graph: Graph) -> None:
+def extract_file(
+    path: Path, graph: Graph, *, file_qn: str | None = None, source_path: Path | None = None
+) -> None:
     """Parse a Java source file and emit nodes/edges into the graph."""
     with open(path, "rb") as f:
         raw = f.read()
@@ -110,10 +118,11 @@ def extract_file(path: Path, graph: Graph) -> None:
     tree = parser.parse(raw)
     root = tree.root_node
 
-    file_qn = path.stem
-    file_id = _add_node(graph, NodeKind.FILE, file_qn, path, 0, 0, source)
+    record_path = source_path if source_path is not None else path
+    file_qn = file_qn or path.stem
+    file_id = _add_node(graph, NodeKind.FILE, file_qn, record_path, 0, 0, source)
 
-    _walk_body(root, source, graph, file_qn, file_id, [])
+    _walk_body(root, source, graph, file_qn, record_path, file_id, [])
 
 
 def _walk_body(
@@ -121,6 +130,7 @@ def _walk_body(
     source: str,
     graph: Graph,
     file_qn: str,
+    path: Path,
     parent_id: NodeId,
     scope: list[str],
 ) -> None:
@@ -145,11 +155,11 @@ def _walk_body(
                 mod_id = _add_node(graph, NodeKind.MODULE, mod_qn, Path(""), 0, 0)
                 graph.add_edge(parent_id, mod_id, Edge.extracted(EdgeKind.IMPORTS))
         elif child.type == "class_declaration":
-            _handle_class(child, source, graph, file_qn, parent_id, scope)
+            _handle_class(child, source, graph, file_qn, path, parent_id, scope)
         elif child.type == "interface_declaration":
-            _handle_interface(child, source, graph, file_qn, parent_id, scope)
+            _handle_interface(child, source, graph, file_qn, path, parent_id, scope)
         elif child.type == "method_declaration":
-            _handle_method(child, source, graph, file_qn, parent_id, scope, False)
+            _handle_method(child, source, graph, file_qn, path, parent_id, scope, False)
 
 
 def _handle_class(
@@ -157,6 +167,7 @@ def _handle_class(
     source: str,
     graph: Graph,
     file_qn: str,
+    path: Path,
     parent_id: NodeId,
     scope: list[str],
 ) -> None:
@@ -173,7 +184,7 @@ def _handle_class(
     if annotations:
         props["annotations"] = annotations
 
-    class_id = _add_node(graph, NodeKind.CLASS, qn, Path(""),
+    class_id = _add_node(graph, NodeKind.CLASS, qn, path,
                          node.start_point.row, node.end_point.row,
                          _text(node), props)
     graph.add_edge(parent_id, class_id, Edge.extracted(EdgeKind.DEFINES))
@@ -203,7 +214,7 @@ def _handle_class(
     # Walk class body
     body = node.child_by_field_name("body")
     if body:
-        _walk_body(body, source, graph, file_qn, class_id, child_scope)
+        _walk_body(body, source, graph, file_qn, path, class_id, child_scope)
 
 
 def _handle_interface(
@@ -211,6 +222,7 @@ def _handle_interface(
     source: str,
     graph: Graph,
     file_qn: str,
+    path: Path,
     parent_id: NodeId,
     scope: list[str],
 ) -> None:
@@ -227,7 +239,7 @@ def _handle_interface(
     if annotations:
         props["annotations"] = annotations
 
-    iface_id = _add_node(graph, NodeKind.TRAIT, qn, Path(""),
+    iface_id = _add_node(graph, NodeKind.TRAIT, qn, path,
                          node.start_point.row, node.end_point.row,
                          _text(node), props)
     graph.add_edge(parent_id, iface_id, Edge.extracted(EdgeKind.DEFINES))
@@ -245,7 +257,7 @@ def _handle_interface(
     # Walk interface body
     body = node.child_by_field_name("body")
     if body:
-        _walk_body(body, source, graph, file_qn, iface_id, child_scope)
+        _walk_body(body, source, graph, file_qn, path, iface_id, child_scope)
 
 
 def _handle_method(
@@ -253,6 +265,7 @@ def _handle_method(
     source: str,
     graph: Graph,
     file_qn: str,
+    path: Path,
     parent_id: NodeId,
     scope: list[str],
     is_nested: bool,
@@ -270,7 +283,7 @@ def _handle_method(
     if annotations:
         props["annotations"] = annotations
 
-    method_id = _add_node(graph, NodeKind.METHOD, qn, Path(""),
+    method_id = _add_node(graph, NodeKind.METHOD, qn, path,
                           node.start_point.row, node.end_point.row,
                           _text(node), props)
     graph.add_edge(parent_id, method_id, Edge.extracted(EdgeKind.DEFINES))
@@ -283,7 +296,7 @@ def _handle_method(
                 param_name = param.child_by_field_name("name")
                 if param_name:
                     param_qn = f"{qn}::{_text(param_name)}"
-                    _add_node(graph, NodeKind.VARIABLE, param_qn, Path(""),
+                    _add_node(graph, NodeKind.VARIABLE, param_qn, path,
                               param.start_point.row, param.end_point.row)
 
     # Walk method body for calls
@@ -291,4 +304,4 @@ def _handle_method(
     if body:
         _emit_calls(body, source, graph, method_id)
         # Also walk nested definitions
-        _walk_body(body, source, graph, file_qn, method_id, child_scope)
+        _walk_body(body, source, graph, file_qn, path, method_id, child_scope)

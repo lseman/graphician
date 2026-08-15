@@ -49,8 +49,11 @@ def _add_node(
     node = node.with_source(str(path), line_start + 1, line_end + 1)
     if source is not None:
         node = node.with_source_text(source)
+    default_props = {"dialect": "javascript"}
     if props:
-        for k, v in props.items():
+        default_props.update(props)
+    if default_props:
+        for k, v in default_props.items():
             node = node.with_property(k, v)
     graph.add_node(node)
     return graph.find_by_qname(qn)
@@ -139,10 +142,10 @@ def _emit_calls_in_tree(node: ts.Node, graph: Graph, caller_id: NodeId, source: 
         stack.extend(_children(child))
 
 
-def _walk(node: ts.Node, source: str, graph: Graph, file_qn: str, parent_id: NodeId, parent_is_class: bool, parent_is_method: bool) -> None:
+def _walk(node: ts.Node, source: str, graph: Graph, file_qn: str, path: Path, parent_id: NodeId, parent_is_class: bool, parent_is_method: bool) -> None:
     for child in _children(node):
         if child.type == "export_statement":
-            _walk(child, source, graph, file_qn, parent_id, parent_is_class, parent_is_method)
+            _walk(child, source, graph, file_qn, path, parent_id, parent_is_class, parent_is_method)
         elif child.type == "function_declaration":
             name_node = _child_by_field(child, "name")
             if not name_node:
@@ -154,34 +157,34 @@ def _walk(node: ts.Node, source: str, graph: Graph, file_qn: str, parent_id: Nod
             props = {}
             if decorators:
                 props["decorators"] = decorators
-            fn_id = _add_node(graph, kind, qn, Path(""), child.start_point.row, child.end_point.row, source, props)
+            fn_id = _add_node(graph, kind, qn, path, child.start_point.row, child.end_point.row, source, props)
             graph.add_edge(parent_id, fn_id, Edge.extracted(EdgeKind.DEFINES))
             body = _child_by_field(child, "body")
             if body:
                 _emit_calls_in_tree(body, graph, fn_id, source)
-                _walk(body, source, graph, file_qn, fn_id, False, False)
+                _walk(body, source, graph, file_qn, path, fn_id, False, False)
 
         elif child.type == "arrow_function":
             qn = f"{file_qn}::arrow_{child.start_point.row}"
             kind = NodeKind.METHOD if parent_is_class else NodeKind.FUNCTION
-            fn_id = _add_node(graph, kind, qn, Path(""), child.start_point.row, child.end_point.row, source)
+            fn_id = _add_node(graph, kind, qn, path, child.start_point.row, child.end_point.row, source)
             graph.add_edge(parent_id, fn_id, Edge.extracted(EdgeKind.DEFINES))
             body = _child_by_field(child, "body")
             if body:
                 _emit_calls_in_tree(body, graph, fn_id, source)
-                _walk(body, source, graph, file_qn, fn_id, False, False)
+                _walk(body, source, graph, file_qn, path, fn_id, False, False)
 
         elif child.type == "function_expression":
             name_node = _child_by_field(child, "name")
             name = _text(name_node, source) if name_node else f"anonymous_{child.start_point.row}"
             qn = f"{file_qn}::{name}"
             kind = NodeKind.METHOD if parent_is_class else NodeKind.FUNCTION
-            fn_id = _add_node(graph, kind, qn, Path(""), child.start_point.row, child.end_point.row, source)
+            fn_id = _add_node(graph, kind, qn, path, child.start_point.row, child.end_point.row, source)
             graph.add_edge(parent_id, fn_id, Edge.extracted(EdgeKind.DEFINES))
             body = _child_by_field(child, "body")
             if body:
                 _emit_calls_in_tree(body, graph, fn_id, source)
-                _walk(body, source, graph, file_qn, fn_id, False, False)
+                _walk(body, source, graph, file_qn, path, fn_id, False, False)
 
         elif child.type == "method_definition":
             name_node = _child_by_field(child, "name")
@@ -193,12 +196,12 @@ def _walk(node: ts.Node, source: str, graph: Graph, file_qn: str, parent_id: Nod
             props = {}
             if decorators:
                 props["decorators"] = decorators
-            fn_id = _add_node(graph, NodeKind.METHOD, qn, Path(""), child.start_point.row, child.end_point.row, source, props)
+            fn_id = _add_node(graph, NodeKind.METHOD, qn, path, child.start_point.row, child.end_point.row, source, props)
             graph.add_edge(parent_id, fn_id, Edge.extracted(EdgeKind.DEFINES))
             body = _child_by_field(child, "body")
             if body:
                 _emit_calls_in_tree(body, graph, fn_id, source)
-                _walk(body, source, graph, file_qn, fn_id, True, False)
+                _walk(body, source, graph, file_qn, path, fn_id, True, False)
 
         elif child.type == "class_declaration":
             name_node = _child_by_field(child, "name")
@@ -211,7 +214,7 @@ def _walk(node: ts.Node, source: str, graph: Graph, file_qn: str, parent_id: Nod
             if decorators:
                 props["decorators"] = decorators
 
-            class_id = _add_node(graph, NodeKind.CLASS, qn, Path(""), child.start_point.row, child.end_point.row, source, props)
+            class_id = _add_node(graph, NodeKind.CLASS, qn, path, child.start_point.row, child.end_point.row, source, props)
             graph.add_edge(parent_id, class_id, Edge.extracted(EdgeKind.DEFINES))
 
             # Extends
@@ -232,13 +235,13 @@ def _walk(node: ts.Node, source: str, graph: Graph, file_qn: str, parent_id: Nod
 
             body = _child_by_field(child, "body")
             if body:
-                _walk(body, source, graph, file_qn, class_id, True, False)
+                _walk(body, source, graph, file_qn, path, class_id, True, False)
 
         elif child.type == "class_expression":
             name_node = _child_by_field(child, "name")
             name = _text(name_node, source) if name_node else f"anon_class_{child.start_point.row}"
             qn = f"{file_qn}::{name}"
-            class_id = _add_node(graph, NodeKind.CLASS, qn, Path(""), child.start_point.row, child.end_point.row, source)
+            class_id = _add_node(graph, NodeKind.CLASS, qn, path, child.start_point.row, child.end_point.row, source)
             graph.add_edge(parent_id, class_id, Edge.extracted(EdgeKind.DEFINES))
             superclass = _child_by_field(child, "superclass")
             if superclass is None:
@@ -255,7 +258,7 @@ def _walk(node: ts.Node, source: str, graph: Graph, file_qn: str, parent_id: Nod
                 graph.add_edge(class_id, graph.find_by_qname(super_qn), Edge.extracted(EdgeKind.INHERITS))
             body = _child_by_field(child, "body")
             if body:
-                _walk(body, source, graph, file_qn, class_id, True, False)
+                _walk(body, source, graph, file_qn, path, class_id, True, False)
 
         elif child.type == "lexical_declaration":
             for declaration in _children(child):
@@ -274,7 +277,7 @@ def _walk(node: ts.Node, source: str, graph: Graph, file_qn: str, parent_id: Nod
                     graph,
                     NodeKind.METHOD if parent_is_class else NodeKind.FUNCTION,
                     f"{file_qn}::{name}",
-                    Path(""),
+                    path,
                     value_node.start_point.row,
                     value_node.end_point.row,
                     _text(value_node, source),
@@ -303,7 +306,9 @@ def _walk(node: ts.Node, source: str, graph: Graph, file_qn: str, parent_id: Nod
                 graph.add_edge(parent_id, mod_id, Edge.extracted(EdgeKind.IMPORTS))
 
 
-def extract_file(path: Path, graph: Graph) -> None:
+def extract_file(
+    path: Path, graph: Graph, *, file_qn: str | None = None, source_path: Path | None = None
+) -> None:
     with open(path, "rb") as f:
         raw = f.read()
     source = raw.decode("utf-8", errors="replace")
@@ -314,6 +319,7 @@ def extract_file(path: Path, graph: Graph) -> None:
     tree = parser.parse(raw)
     root = tree.root_node
 
-    file_qn = path.stem
-    file_id = _add_node(graph, NodeKind.FILE, file_qn, path, 0, 0, source)
-    _walk(root, source, graph, file_qn, file_id, False, False)
+    record_path = source_path if source_path is not None else path
+    file_qn = file_qn or path.stem
+    file_id = _add_node(graph, NodeKind.FILE, file_qn, record_path, 0, 0, source)
+    _walk(root, source, graph, file_qn, record_path, file_id, False, False)

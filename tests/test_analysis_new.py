@@ -4,13 +4,13 @@ Covers: paths, impact, search, centrality — all aligned with the Rust
 reference implementation at ariadne-graph/src/analysis/.
 """
 
-from ariadne_py.analysis.centrality import (
+from graphician.analysis.centrality import (
     is_rank_noise,
     pagerank,
     personalized_pagerank,
 )
-from ariadne_py.analysis.impact import ImpactQuery, find_impact
-from ariadne_py.analysis.paths import (
+from graphician.analysis.impact import ImpactQuery, find_impact
+from graphician.analysis.paths import (
     PathQuery,
     WeightedPath,
     callees_of,
@@ -19,17 +19,17 @@ from ariadne_py.analysis.paths import (
     find_top_paths,
     max_depth_from,
 )
-from ariadne_py.analysis.search import (
+from graphician.analysis.search import (
     SearchIntent,
     fts_ranked_search,
     ranked_search,
     search_by_name,
     task_aware_search,
 )
-from ariadne_py.core.edge import Confidence, Edge, EdgeKind
-from ariadne_py.core.graph import Graph
-from ariadne_py.core.id import NodeId
-from ariadne_py.core.node import Node, NodeKind
+from graphician.core.edge import Confidence, Edge, EdgeKind
+from graphician.core.graph import Graph
+from graphician.core.id import NodeId
+from graphician.core.node import Node, NodeKind
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

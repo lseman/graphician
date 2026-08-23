@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from ariadne_py.core import EdgeKind, Graph, Node, NodeKind
-from ariadne_py.extraction.languages.parsers import cpp, java, javascript, python, typescript
-from ariadne_py.extraction.manifests import cargo_toml, package_json, pyproject_toml
+from graphician.core import EdgeKind, Graph, Node, NodeKind
+from graphician.extraction.languages.parsers import cpp, java, javascript, python, typescript
+from graphician.extraction.manifests import cargo_toml, package_json, pyproject_toml
 
 
 def _nodes(graph: Graph, kind: NodeKind | None = None):

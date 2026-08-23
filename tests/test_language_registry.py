@@ -2,7 +2,7 @@
 
 import pytest
 
-from ariadne_py.extraction.languages import Language, LanguageRegistry
+from graphician.extraction.languages import Language, LanguageRegistry
 
 
 @pytest.mark.parametrize("language", list(Language))

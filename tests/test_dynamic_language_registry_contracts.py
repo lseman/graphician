@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from ariadne_py.core import EdgeKind, Graph, NodeKind
-from ariadne_py.extraction.languages import custom_lang
-from ariadne_py.extraction.languages.language_registry import (
+from graphician.core import EdgeKind, Graph, NodeKind
+from graphician.extraction.languages import custom_lang
+from graphician.extraction.languages.language_registry import (
     LanguageDef,
     LanguageRegistry,
     _merge_entry,

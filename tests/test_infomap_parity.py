@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from ariadne_py.analysis.communities.core import CommunityOptions, WorkingGraph
-from ariadne_py.analysis.communities.infomap import (
+from graphician.analysis.communities.core import CommunityOptions, WorkingGraph
+from graphician.analysis.communities.infomap import (
     LcgRng,
     _compute_lmdl,
     _entropy_term,
@@ -13,7 +13,7 @@ from ariadne_py.analysis.communities.infomap import (
     infomap,
     infomap_with_options,
 )
-from ariadne_py.core import Edge, EdgeKind, Graph, Node, NodeKind
+from graphician.core import Edge, EdgeKind, Graph, Node, NodeKind
 
 
 def _add_nodes(graph: Graph, count: int):

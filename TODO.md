@@ -142,7 +142,9 @@ extraction/
 - ✅ Rust's grouped CLI forms (`analysis`, `git`, `structure`, `advanced`, `agent`,
   `maintenance`, and `utility`) are accepted alongside Python's flat aliases.
 - ✅ `eval`, `jedi-enrich`, and `spring-di-resolve` are exposed from the Python CLI.
-- ✅ The seven Rust evaluation benchmarks and CSV/JSON result formats are available.
+- ✅ All 9 evaluation benchmarks (7 original + `call_coverage` + `graph_coverage`) and CSV/JSON result formats are available.
+- ✅ `differential` tool operation exposed via `tool_response` dispatch table.
+- ✅ `context` CLI subcommand added (wraps `minimal_context`).
 - ✅ Graph self-loops and parallel edges use Rust/petgraph semantics, allowing lossless
   Rust-to-Python database loading.
 

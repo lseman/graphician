@@ -2,23 +2,23 @@ from __future__ import annotations
 
 import pytest
 
-from ariadne_py.analysis.flows.detection import (
+from graphician.analysis.flows.detection import (
     _detect_entry_points,
     affected_flows,
     all_flows,
     compute_flows_with_options,
     flows_through,
 )
-from ariadne_py.analysis.flows.entry_points import (
+from graphician.analysis.flows.entry_points import (
     _is_framework_entry,
     _is_generic_event_entry,
     _is_java_framework_entry,
     _is_js_ts_framework_entry,
     _is_python_framework_entry,
 )
-from ariadne_py.analysis.flows.trace import _compute_criticality, _is_test_node, _trace_flow
-from ariadne_py.analysis.flows.types import FlowOptions
-from ariadne_py.core import Edge, EdgeKind, Graph, Node, NodeKind
+from graphician.analysis.flows.trace import _compute_criticality, _is_test_node, _trace_flow
+from graphician.analysis.flows.types import FlowOptions
+from graphician.core import Edge, EdgeKind, Graph, Node, NodeKind
 
 
 def _node(name: str, **properties) -> Node:

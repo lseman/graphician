@@ -1,9 +1,9 @@
 """Regression tests for graph-derived test coverage."""
 
-from ariadne_py.analysis.changes.coverage import compute_test_coverage
-from ariadne_py.core.edge import Edge, EdgeKind
-from ariadne_py.core.graph import Graph
-from ariadne_py.core.node import Node, NodeKind
+from graphician.analysis.changes.coverage import compute_test_coverage
+from graphician.core.edge import Edge, EdgeKind
+from graphician.core.graph import Graph
+from graphician.core.node import Node, NodeKind
 
 
 def test_coverage_counts_tested_and_untested_symbols() -> None:

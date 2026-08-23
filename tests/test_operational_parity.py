@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from ariadne_py.core import Edge, EdgeKind, Graph, Node, NodeKind
-from ariadne_py.evaluation import BENCHMARKS, load_config
-from ariadne_py.extraction.spring_di import resolve_spring_injections
-from ariadne_py.interfaces.cli import _normalize_grouped_argv
-from ariadne_py.persistence.store import GraphStore
+from graphician.core import Edge, EdgeKind, Graph, Node, NodeKind
+from graphician.evaluation import BENCHMARKS, load_config
+from graphician.extraction.spring_di import resolve_spring_injections
+from graphician.interfaces.cli import _normalize_grouped_argv
+from graphician.persistence.store import GraphStore
 
 
 def _create_rust_database(path: Path) -> None:
@@ -144,10 +144,14 @@ def test_evaluation_config_and_registry_match_rust(tmp_path: Path) -> None:
         "token_efficiency",
         "flow_completeness",
         "impact_accuracy",
+        "impact_accuracy_learned",
         "search_quality",
         "build_performance",
         "multi_hop_retrieval",
         "agent_baseline",
+        "test_coverage",
+        "graph_coverage",
+        "call_coverage",
     )
 
 

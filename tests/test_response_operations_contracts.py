@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ariadne_py.core import Edge, EdgeKind, Graph, Node, NodeKind
-from ariadne_py.interfaces.cli.response.flows import handle_flows, handle_test_coverage
-from ariadne_py.interfaces.cli.response.impact import handle_god_nodes, handle_impact, hub_nodes_json
-from ariadne_py.interfaces.cli.response.paths import _simple_paths, handle_paths
-from ariadne_py.interfaces.cli.response.search import (
+from graphician.core import Edge, EdgeKind, Graph, Node, NodeKind
+from graphician.interfaces.cli.response.flows import handle_flows, handle_test_coverage
+from graphician.interfaces.cli.response.impact import handle_god_nodes, handle_impact, hub_nodes_json
+from graphician.interfaces.cli.response.paths import _simple_paths, handle_paths
+from graphician.interfaces.cli.response.search import (
     _fuzzy_match,
     _score_match,
     find_related_json,
     handle_context_pack,
     handle_search,
 )
-from ariadne_py.interfaces.cli.response.token_savings import (
+from graphician.interfaces.cli.response.token_savings import (
     approx_tokens,
     format_panel,
     per_file_tokens,

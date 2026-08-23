@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ariadne_py.core import EdgeKind, Graph, NodeKind
-from ariadne_py.extraction.languages import LanguageRegistry
-from ariadne_py.extraction.languages.parsers.rust import extract_file
-from ariadne_py.extraction.pipeline import ExtractionPipeline
+from graphician.core import EdgeKind, Graph, NodeKind
+from graphician.extraction.languages import LanguageRegistry
+from graphician.extraction.languages.parsers.rust import extract_file
+from graphician.extraction.pipeline import ExtractionPipeline
 
 
 def _extract(tmp_path: Path, source: str) -> Graph:
@@ -46,10 +46,13 @@ impl Job {
 """,
     )
     qnames = _qnames(graph)
-    assert {"lib::Runner", "lib::Job", "lib::Job::Runner::impl", "lib::Job::impl"} <= qnames
+    # IMPL nodes are NOT created (matching ariadne-rust behavior).
+    # Methods are extracted directly under their containing class.
+    assert {"lib::Runner", "lib::Job"} <= qnames
     assert "lib::Job::tick::nested" in qnames
     assert graph.node(graph.find_by_qname("lib::Runner")).kind is NodeKind.TRAIT
-    assert graph.node(graph.find_by_qname("lib::Job::Runner::impl")).kind is NodeKind.IMPL
+    # No IMPL node exists — matching ariadne-rust
+    assert graph.find_by_qname("lib::Job::Runner::impl") is None
     assert {"call::helper", "call::tick", "call::fetch", "call::nested", "call::deep"} <= qnames
     assert any(
         edge.kind is EdgeKind.CALLS and graph.node(dst).qualified_name == "call::fetch"

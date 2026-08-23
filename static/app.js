@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-// ARIADNE GRAPH EXPLORER — sigma.js / WebGL renderer
+// GRAPHICIAN GRAPH EXPLORER — sigma.js / WebGL renderer
 // ═══════════════════════════════════════════════════════════════
 
 (function () {

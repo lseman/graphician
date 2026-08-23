@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from ariadne_py.core import Graph
-from ariadne_py.extraction.languages.parsers import cpp, java, javascript, python, typescript
-from ariadne_py.interfaces.cli.response import tool_response
-from ariadne_py.persistence.store import GraphStore
+from graphician.core import Graph
+from graphician.extraction.languages.parsers import cpp, java, javascript, python, typescript
+from graphician.interfaces.cli.response import tool_response
+from graphician.persistence.store import GraphStore
 
 # (language, filename, source, entry_qualified_name_suffix)
 _LANGUAGE_FIXTURES = [

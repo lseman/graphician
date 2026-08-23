@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ariadne_py.analysis.context_pack import (
+from graphician.analysis.context_pack import (
     ContextItem,
     _compute_diversity_penalty,
     _compute_relevance,
@@ -8,17 +8,17 @@ from ariadne_py.analysis.context_pack import (
     _get_node_content,
     _select_diverse,
 )
-from ariadne_py.analysis.counterfactual import run_without_edges
-from ariadne_py.analysis.dedup import deduplicate_nodes
-from ariadne_py.analysis.dedup.lsh import LshIndex, lsh_candidate_pairs
-from ariadne_py.analysis.dedup.minhash import MinHash, shingle
-from ariadne_py.analysis.dedup.normalize import normalize_label, passes_entropy_gate, shannon_entropy
-from ariadne_py.analysis.dedup.similarity import jaro_winkler
-from ariadne_py.analysis.dedup.types import DedupOptions
-from ariadne_py.analysis.dedup.union_find import UnionFind
-from ariadne_py.analysis.quality import community_cohesion, community_quality
-from ariadne_py.analysis.semsearch import EmbeddingIndex, _cosine_similarity, semantic_search
-from ariadne_py.core import Edge, EdgeKind, Graph, Node, NodeKind
+from graphician.analysis.counterfactual import run_without_edges
+from graphician.analysis.dedup import deduplicate_nodes
+from graphician.analysis.dedup.lsh import LshIndex, lsh_candidate_pairs
+from graphician.analysis.dedup.minhash import MinHash, shingle
+from graphician.analysis.dedup.normalize import normalize_label, passes_entropy_gate, shannon_entropy
+from graphician.analysis.dedup.similarity import jaro_winkler
+from graphician.analysis.dedup.types import DedupOptions
+from graphician.analysis.dedup.union_find import UnionFind
+from graphician.analysis.quality import community_cohesion, community_quality
+from graphician.analysis.semsearch import EmbeddingIndex, _cosine_similarity, semantic_search
+from graphician.core import Edge, EdgeKind, Graph, Node, NodeKind
 
 
 def _graph() -> tuple[Graph, list]:

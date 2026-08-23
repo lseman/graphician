@@ -2,11 +2,11 @@
 
 import pytest
 
-from ariadne_py.core.edge import Edge, EdgeKind
-from ariadne_py.core.graph import Graph
-from ariadne_py.core.id import NodeId
-from ariadne_py.core.node import Node, NodeKind
-from ariadne_py.extraction.call_resolution import (
+from graphician.core.edge import Edge, EdgeKind
+from graphician.core.graph import Graph
+from graphician.core.id import NodeId
+from graphician.core.node import Node, NodeKind
+from graphician.extraction.call_resolution import (
     common_prefix_len,
     module_stem,
     resolve_call_placeholders,

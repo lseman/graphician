@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ariadne_py.core import Edge, EdgeKind, Graph, Node, NodeKind
-from ariadne_py.interfaces.cli.response import tool_response
-from ariadne_py.interfaces.cli.response.analysis import gaps_json
-from ariadne_py.persistence.store import GraphStore
+from graphician.core import Edge, EdgeKind, Graph, Node, NodeKind
+from graphician.interfaces.cli.response import tool_response
+from graphician.interfaces.cli.response.analysis import gaps_json
+from graphician.persistence.store import GraphStore
 
 
 def _write_graph(path: Path) -> tuple[str, str]:
@@ -99,7 +99,7 @@ def test_remaining_agent_operations_are_wired_and_write_outputs(tmp_path: Path) 
     assert "error" not in patterns
     assert dedup["operation"] == "dedup"
     assert report["written"] is True
-    assert report_path.read_text().startswith("# Ariadne Graph Report")
+    assert report_path.read_text().startswith("# Graphician Graph Report")
     assert wiki["operation"] == "wiki"
     assert (wiki_path / "index.md").is_file()
 

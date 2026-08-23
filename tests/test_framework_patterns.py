@@ -2,10 +2,10 @@
 
 import pytest
 
-from ariadne_py.core.edge import Edge, EdgeKind
-from ariadne_py.core.graph import Graph
-from ariadne_py.core.node import Node, NodeKind
-from ariadne_py.extraction.patterns.framework_patterns import (
+from graphician.core.edge import Edge, EdgeKind
+from graphician.core.graph import Graph
+from graphician.core.node import Node, NodeKind
+from graphician.extraction.patterns.framework_patterns import (
     FrameworkPattern,
     PatternCategory,
     PatternMatch,

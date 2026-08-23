@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from ariadne_py.analysis.changes.coverage import compute_test_coverage
-from ariadne_py.analysis.changes.detection import _parse_diff, detect_changes
-from ariadne_py.analysis.changes.risk import compute_risk
-from ariadne_py.core import Edge, EdgeKind, Graph, Node, NodeKind
+from graphician.analysis.changes.coverage import compute_test_coverage
+from graphician.analysis.changes.detection import _parse_diff, detect_changes
+from graphician.analysis.changes.risk import compute_risk
+from graphician.core import Edge, EdgeKind, Graph, Node, NodeKind
 
 
 def _located(kind: NodeKind, qname: str, path: str, start: int, end: int, **props) -> Node:

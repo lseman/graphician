@@ -1,8 +1,8 @@
 """Regression tests for Rust parser extraction details."""
 
-from ariadne_py.core.edge import EdgeKind
-from ariadne_py.core.graph import Graph
-from ariadne_py.extraction.languages.parsers.rust import extract_file
+from graphician.core.edge import EdgeKind
+from graphician.core.graph import Graph
+from graphician.extraction.languages.parsers.rust import extract_file
 
 
 def test_method_call_captures_positional_receiver(tmp_path) -> None:

@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
-from ariadne_py.analysis.communities import gaps
-from ariadne_py.analysis.communities.nodes import (
+from graphician.analysis.communities import gaps
+from graphician.analysis.communities.nodes import (
     compute_centrality,
     find_bridge_nodes,
     find_god_nodes,
     find_hub_nodes,
     is_rank_noise,
 )
-from ariadne_py.analysis.communities.split import _build_subgraph
-from ariadne_py.analysis.export import export_graphml
-from ariadne_py.core import Edge, EdgeKind, Graph, Node, NodeKind
+from graphician.analysis.communities.split import _build_subgraph
+from graphician.analysis.export import export_graphml
+from graphician.core import Edge, EdgeKind, Graph, Node, NodeKind
 
 
 def _fixture_graph():

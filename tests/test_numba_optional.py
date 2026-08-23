@@ -9,7 +9,7 @@ def test_numba_acceleration_module_imports_without_numba(monkeypatch) -> None:
     module_path = (
         Path(__file__).parents[1]
         / "src"
-        / "ariadne_py"
+        / "graphician"
         / "analysis"
         / "communities"
         / "numba_accel.py"

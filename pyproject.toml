@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ariadne-py"
+name = "graphician"
 version = "0.1.0"
 description = "A local-first code graph for navigating, reviewing, and reasoning about a codebase."
 requires-python = ">=3.11"
@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
-ariadne = "ariadne_py.interfaces.cli:main"
+graphician = "graphician.interfaces.cli:main"
 
 [project.optional-dependencies]
 embeddings = [
@@ -52,15 +52,20 @@ warn_return_any = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "--cov=ariadne_py --cov-report=term-missing --cov-report=xml --cov-fail-under=60"
+testpaths = ["src", "tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "--cov=graphician --cov-report=term-missing --cov-report=xml --cov-fail-under=60"
+filterwarnings = ["ignore::DeprecationWarning"]
 
 [tool.coverage.run]
 branch = true
-source = ["ariadne_py"]
+source = ["graphician"]
 
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ariadne_py"]
+packages = ["src/graphician"]

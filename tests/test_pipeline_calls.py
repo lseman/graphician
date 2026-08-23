@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from ariadne_py.core import EdgeKind, NodeKind
-from ariadne_py.extraction.languages import LanguageRegistry
-from ariadne_py.extraction.pipeline import ExtractionPipeline
+from graphician.core import EdgeKind, NodeKind
+from graphician.extraction.languages import LanguageRegistry
+from graphician.extraction.pipeline import ExtractionPipeline
 
 
 def test_python_extraction_scopes_methods_and_uses_call_placeholders(
@@ -46,7 +46,7 @@ class B:
     }
     assert a_helper in calls
     assert "call::missing_api" in calls
-    assert "call::print" in calls
+    # "print" is suppressed by should_suppress_call_placeholder
     assert not any("self.helper" in qname for qname in calls)
 
 

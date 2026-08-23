@@ -6,11 +6,11 @@ import warnings
 
 import pytest
 
-from ariadne_py.core import Confidence, Edge, EdgeKind, Graph, Node, NodeKind
-from ariadne_py.persistence import embeddings
-from ariadne_py.persistence.embeddings import ExternalEmbeddingConfig
-from ariadne_py.persistence.fts import FTSIndex, build_fts5_query
-from ariadne_py.persistence.store import (
+from graphician.core import Confidence, Edge, EdgeKind, Graph, Node, NodeKind
+from graphician.persistence import embeddings
+from graphician.persistence.embeddings import ExternalEmbeddingConfig
+from graphician.persistence.fts import FTSIndex, build_fts5_query
+from graphician.persistence.store import (
     GraphStore,
     _graph_from_payload,
     _graph_to_payload,

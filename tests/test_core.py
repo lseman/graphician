@@ -1,9 +1,9 @@
 """Tests for core graph types."""
 
-from ariadne_py.core.edge import Edge, EdgeKind, Confidence
-from ariadne_py.core.graph import Graph
-from ariadne_py.core.id import NodeId
-from ariadne_py.core.node import Node, NodeKind
+from graphician.core.edge import Edge, EdgeKind, Confidence
+from graphician.core.graph import Graph
+from graphician.core.id import NodeId
+from graphician.core.node import Node, NodeKind
 
 
 class TestNodeId:

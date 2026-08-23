@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from ariadne_py.analysis.type_resolution import resolve_type_placeholders
-from ariadne_py.core import Edge, EdgeKind, Graph, Node, NodeKind
-from ariadne_py.extraction.exclusions import default_ignored_name
-from ariadne_py.extraction.suppress_list import SuppressList, should_suppress_call_placeholder
-from ariadne_py.extraction.test_detect import is_test_file_path, is_test_name
+from graphician.analysis.type_resolution import resolve_type_placeholders
+from graphician.core import Edge, EdgeKind, Graph, Node, NodeKind
+from graphician.extraction.exclusions import default_ignored_name
+from graphician.extraction.suppress_list import SuppressList, should_suppress_call_placeholder
+from graphician.extraction.test_detect import is_test_file_path, is_test_name
 
 
 def test_type_placeholder_resolution_rewires_unique_types_and_removes_orphan() -> None:

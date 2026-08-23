@@ -8,23 +8,23 @@ from pathlib import Path
 
 import pytest
 
-from ariadne_py.core.edge import Confidence, Edge, EdgeKind
-from ariadne_py.core.graph import Graph
-from ariadne_py.core.node import Node, NodeKind
-from ariadne_py.extraction.compiler import (
+from graphician.core.edge import Confidence, Edge, EdgeKind
+from graphician.core.graph import Graph
+from graphician.core.node import Node, NodeKind
+from graphician.extraction.compiler import (
     CompilerEdgeEvidence,
     CompilerEvidenceFile,
     apply_compiler_evidence,
     load_compiler_evidence,
 )
-from ariadne_py.extraction.languages import LanguageRegistry
-from ariadne_py.extraction.pipeline import ExtractionPipeline
-from ariadne_py.extraction.rust_analyzer import _file_uri_to_path, _read_message
-from ariadne_py.interfaces.cli.git import collect_file_hashes, graph_freshness
-from ariadne_py.interfaces.cli.response import tool_response
-from ariadne_py.persistence.store import GraphStore, IncompatibleDatabaseError
-from ariadne_py.analysis.diff import graph_diff
-from ariadne_py.interfaces.transport.mcp import AriadneMCP
+from graphician.extraction.languages import LanguageRegistry
+from graphician.extraction.pipeline import ExtractionPipeline
+from graphician.extraction.rust_analyzer import _file_uri_to_path, _read_message
+from graphician.interfaces.cli.git import collect_file_hashes, graph_freshness
+from graphician.interfaces.cli.response import tool_response
+from graphician.persistence.store import GraphStore, IncompatibleDatabaseError
+from graphician.analysis.diff import graph_diff
+from graphician.interfaces.transport.mcp import GraphicianMCP
 
 
 def test_tool_status_reports_call_resolution(tmp_path: Path) -> None:
@@ -331,7 +331,7 @@ def test_incremental_save_preserves_stable_rows_and_updates_indexes(tmp_path: Pa
 def test_extended_tool_operations_share_mcp_dispatch() -> None:
     graph = Graph()
     graph.add_node(Node.new(NodeKind.FUNCTION, "pkg::entry"))
-    server = AriadneMCP()
+    server = GraphicianMCP()
     server.graph = graph
     server._initialized = True
 
@@ -346,7 +346,7 @@ def test_extended_tool_operations_share_mcp_dispatch() -> None:
 def test_legacy_mcp_search_matches_current_hybrid_search_signature() -> None:
     graph = Graph()
     graph.add_node(Node.new(NodeKind.FUNCTION, "pkg::entry"))
-    server = AriadneMCP()
+    server = GraphicianMCP()
     server.graph = graph
     server._initialized = True
 

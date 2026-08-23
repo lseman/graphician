@@ -1,9 +1,9 @@
 """Tests for the execution flow detection engine."""
 
-from ariadne_py.core.edge import Edge, EdgeKind
-from ariadne_py.core.graph import Graph
-from ariadne_py.core.node import Node, NodeKind
-from ariadne_py.extraction.flows import (
+from graphician.core.edge import Edge, EdgeKind
+from graphician.core.graph import Graph
+from graphician.core.node import Node, NodeKind
+from graphician.extraction.flows import (
     FlowOptions,
     all_flows,
     compute_flows,
@@ -82,7 +82,7 @@ class TestComputeFlows:
         assert len(members) == 2
 
     def test_ambiguous_placeholder_skipped(self):
-        from ariadne_py.core.edge import Confidence
+        from graphician.core.edge import Confidence
         graph = Graph()
         main = graph.add_node(_add_fn(graph, "file::main.rs::main"))
         real = graph.add_node(_add_fn(graph, "file::main.rs::real"))

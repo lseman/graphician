@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ariadne_py.analysis.structure import (
+from graphician.analysis.structure import (
     approx_betweenness,
     bridge_scores,
     call_resolution_stats,
@@ -14,7 +14,7 @@ from ariadne_py.analysis.structure import (
     find_large_functions,
     find_motifs,
 )
-from ariadne_py.core import Edge, EdgeKind, Graph, Node, NodeKind
+from graphician.core import Edge, EdgeKind, Graph, Node, NodeKind
 
 
 def _node(graph: Graph, name: str, kind: NodeKind = NodeKind.FUNCTION, **props):

@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from ariadne_py.core import EdgeKind, Graph, Node, NodeKind
-from ariadne_py.extraction.documents import concept_registry
-from ariadne_py.extraction.documents.document_utils import (
+from graphician.core import EdgeKind, Graph, Node, NodeKind
+from graphician.extraction.documents import concept_registry
+from graphician.extraction.documents.document_utils import (
     normalize_for_match,
     resolve_mentions,
     resolve_symbol,

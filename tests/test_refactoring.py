@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from ariadne_py.core.edge import Edge, EdgeKind
-from ariadne_py.core.graph import Graph
-from ariadne_py.core.node import Node, NodeKind
-from ariadne_py.analysis.refactoring.types import RenameEdit, RenamePreview, RenameStats, Confidence
-from ariadne_py.analysis.refactoring.engine import (
+from graphician.core.edge import Edge, EdgeKind
+from graphician.core.graph import Graph
+from graphician.core.node import Node, NodeKind
+from graphician.analysis.refactoring.types import RenameEdit, RenamePreview, RenameStats, Confidence
+from graphician.analysis.refactoring.engine import (
     rename_preview,
     find_dead_code,
     is_entry_point,

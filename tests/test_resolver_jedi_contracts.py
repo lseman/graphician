@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from ariadne_py.core import Edge, EdgeKind, Graph, Node, NodeKind
-from ariadne_py.extraction.jedi import enrich_jedi_calls
-from ariadne_py.extraction.jedi.parse import parse_jedi_results
-from ariadne_py.extraction.jedi.scan import find_dropped_calls
-from ariadne_py.extraction.jedi.script_gen import build_jedi_script
-from ariadne_py.extraction.languages.tsconfig_resolver import (
+from graphician.core import Edge, EdgeKind, Graph, Node, NodeKind
+from graphician.extraction.jedi import enrich_jedi_calls
+from graphician.extraction.jedi.parse import parse_jedi_results
+from graphician.extraction.jedi.scan import find_dropped_calls
+from graphician.extraction.jedi.script_gen import build_jedi_script
+from graphician.extraction.languages.tsconfig_resolver import (
     TsconfigData,
     _find_nearest_tsconfig,
     _parse_tsconfig,

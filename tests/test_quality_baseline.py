@@ -2,14 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from ariadne_py.analysis.quality_baseline import (
+from graphician.analysis.quality_baseline import (
     _percentile,
     benchmark_store,
     evaluate_cochange,
     impact_accuracy,
 )
-from ariadne_py.core import Edge, EdgeKind, Graph, Node, NodeKind
-from ariadne_py.persistence.store import GraphStore
+from graphician.core import Edge, EdgeKind, Graph, Node, NodeKind
+from graphician.persistence.store import GraphStore
 
 
 def test_impact_accuracy_reports_precision_recall_and_f1() -> None:

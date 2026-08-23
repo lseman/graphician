@@ -27,6 +27,9 @@ env/
 # Database
 *.db
 
+# Scripts (ad-hoc debug/dev scripts, not pytest tests)
+scripts/
+
 # OS
 .DS_Store
 Thumbs.db

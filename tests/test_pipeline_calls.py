@@ -48,3 +48,46 @@ class B:
     assert "call::missing_api" in calls
     assert "call::print" in calls
     assert not any("self.helper" in qname for qname in calls)
+
+
+def test_tested_by_edges_link_only_the_calling_test(tmp_path: Path) -> None:
+    """A test file with several test functions must only wire tested_by
+    from the production function to the specific test(s) that call it,
+    not fan out to every test function in the file."""
+    prod = tmp_path / "widget.py"
+    prod.write_text(
+        """class Widget:
+    def render(self):
+        return "ok"
+"""
+    )
+    test_file = tmp_path / "test_widget.py"
+    test_file.write_text(
+        """from widget import Widget
+
+def test_render():
+    w = Widget()
+    assert w.render() == "ok"
+
+def test_unrelated_one():
+    assert True
+
+def test_unrelated_two():
+    assert True
+"""
+    )
+
+    graph = ExtractionPipeline(LanguageRegistry()).build(tmp_path)
+
+    render_id = next(
+        node_id
+        for node_id, node in graph.nodes()
+        if node.kind is NodeKind.METHOD
+        and node.qualified_name == "file::widget.py::Widget::render"
+    )
+    tested_by_targets = {
+        graph.node(target).qualified_name
+        for target, edge in graph.out_neighbors(render_id)
+        if edge.kind is EdgeKind.TESTED_BY and graph.node(target) is not None
+    }
+    assert tested_by_targets == {"file::test_widget.py::test_render"}

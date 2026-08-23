@@ -826,41 +826,39 @@ class ExtractionPipeline:
             extract_data_flow(self.graph, node_id, source_text or "")
 
     def _derive_tested_by_edges(self) -> None:
-        """Derive production-to-test relationships from test-file calls."""
-        tests_by_file: dict[str, list[NodeId]] = {}
-        for node_id, node in self.graph.nodes():
-            if node.kind in (NodeKind.FUNCTION, NodeKind.METHOD) and node.properties.get("is_test"):
-                tests_by_file.setdefault(node.source_uri or "", []).append(node_id)
+        """Reverse every test_fn -[CALLS]-> production_fn edge into a
+        production_fn -[TESTED_BY]-> test_fn edge.
 
-        additions: list[tuple[NodeId, NodeId]] = []
+        "Test" is the *calling* node having is_test=true. Placeholder
+        targets (qualified names starting with "call::") are ignored —
+        they're never real definitions. Idempotent: an existing TESTED_BY
+        edge between the same pair is left alone.
+        """
+        existing = {
+            (source_id, target_id)
+            for _, source_id, target_id, edge in self.graph.edges()
+            if edge.kind == EdgeKind.TESTED_BY
+        }
+
+        seen: set[tuple[NodeId, NodeId]] = set()
         for _, source_id, target_id, edge in self.graph.edges():
             if edge.kind != EdgeKind.CALLS:
                 continue
             source = self.graph.node(source_id)
             target = self.graph.node(target_id)
-            if source is None or target is None or target.properties.get("is_test"):
+            if source is None or target is None:
                 continue
-            production_id = target_id
-            if target.source_uri is None:
-                candidates = [
-                    node_id
-                    for node_id, node in self.graph.nodes()
-                    if node_id != target_id
-                    and node.name == target.name
-                    and node.kind in (NodeKind.FUNCTION, NodeKind.METHOD)
-                    and not node.properties.get("is_test")
-                    and node.source_uri is not None
-                ]
-                if len(candidates) != 1:
-                    continue
-                production_id = candidates[0]
-            additions.extend(
-                (production_id, test_id)
-                for test_id in tests_by_file.get(source.source_uri or "", [])
-                if production_id != test_id
-            )
-        for production, test in additions:
-            self.graph.add_edge(production, test, Edge.extracted(EdgeKind.TESTED_BY))
+            if not source.properties.get("is_test"):
+                continue
+            if target.properties.get("is_test"):
+                continue
+            if target.qualified_name.startswith("call::"):
+                continue
+            pair = (target_id, source_id)
+            if pair in existing or pair in seen:
+                continue
+            seen.add(pair)
+            self.graph.add_edge(target_id, source_id, Edge.extracted(EdgeKind.TESTED_BY))
 
     def _build_flows(self) -> None:
         """Build execution flows via the dedicated flow detection engine."""

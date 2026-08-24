@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" font-family="system-ui, -apple-system, sans-serif">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="hexGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="50%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="200" height="200" rx="36" fill="url(#bgGrad)"/>
+
+  <!-- Stylized hexagonal network mark -->
+
+  <!-- Three connected hex nodes forming a triangle / graph -->
+  <g filter="url(#glow)" fill="none" stroke-width="2.5">
+    <!-- Top hex -->
+    <polygon points="100,38 116,47 116,65 100,74 84,65 84,47" stroke="url(#hexGrad)" stroke-width="3"/>
+    <circle cx="100" cy="56" r="5" fill="#3b82f6"/>
+
+    <!-- Bottom-right hex -->
+    <polygon points="148,100 164,109 164,127 148,136 132,127 132,109" stroke="url(#hexGrad)" stroke-width="3"/>
+    <circle cx="148" cy="118" r="5" fill="#06b6d4"/>
+
+    <!-- Bottom-left hex -->
+    <polygon points="52,100 68,109 68,127 52,136 36,127 36,109" stroke="url(#hexGrad)" stroke-width="3"/>
+    <circle cx="52" cy="118" r="5" fill="#8b5cf6"/>
+  </g>
+
+  <!-- Connecting edges -->
+  <line x1="100" y1="74" x2="132" y2="109" stroke="#475569" stroke-width="2"/>
+  <line x1="100" y1="74" x2="68" y2="109" stroke="#475569" stroke-width="2"/>
+  <line x1="132" y1="127" x2="68" y2="127" stroke="#475569" stroke-width="2"/>
+
+  <!-- Central hub node -->
+  <circle cx="100" cy="108" r="8" fill="url(#hexGrad)" opacity="0.9"/>
+
+  <!-- Inner dot connections -->
+  <line x1="100" y1="56" x2="100" y2="100" stroke="#64748b" stroke-width="1.5" opacity="0.6"/>
+  <line x1="148" y1="118" x2="108" y2="112" stroke="#64748b" stroke-width="1.5" opacity="0.6"/>
+  <line x1="52" y1="118" x2="92" y2="112" stroke="#64748b" stroke-width="1.5" opacity="0.6"/>
+</svg>

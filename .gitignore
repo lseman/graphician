@@ -33,3 +33,7 @@ scripts/
 # OS
 .DS_Store
 Thumbs.db
+
+# Large binaries / session data
+ariadne
+.logician/

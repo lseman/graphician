@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" font-family="system-ui, -apple-system, sans-serif">
+  <defs>
+    <radialGradient id="node1" cx="40%" cy="40%">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </radialGradient>
+    <radialGradient id="node2" cx="40%" cy="40%">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </radialGradient>
+    <radialGradient id="node3" cx="40%" cy="40%">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </radialGradient>
+    <radialGradient id="node4" cx="40%" cy="40%">
+      <stop offset="0%" stop-color="#c084fc"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </radialGradient>
+    <radialGradient id="node5" cx="40%" cy="40%">
+      <stop offset="0%" stop-color="#f87171"/>
+      <stop offset="100%" stop-color="#ef4444"/>
+    </radialGradient>
+    <radialGradient id="node6" cx="40%" cy="40%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0ea5e9"/>
+    </radialGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="92" fill="#0f172a"/>
+  <circle cx="100" cy="100" r="92" fill="none" stroke="#1e293b" stroke-width="2"/>
+
+  <!-- Connected nodes forming a network / "G" shape -->
+
+  <!-- Outer ring of nodes (forming G arc) -->
+  <circle cx="100" cy="48" r="12" fill="url(#node1)" filter="url(#glow)"/>
+  <circle cx="148" cy="72" r="10" fill="url(#node2)" filter="url(#glow)"/>
+  <circle cx="158" cy="120" r="10" fill="url(#node3)" filter="url(#glow)"/>
+  <circle cx="130" cy="158" r="12" fill="url(#node4)" filter="url(#glow)"/>
+  <circle cx="85" cy="162" r="10" fill="url(#node5)" filter="url(#glow)"/>
+  <circle cx="52" cy="130" r="10" fill="url(#node6)" filter="url(#glow)"/>
+  <circle cx="48" cy="82" r="10" fill="url(#node1)" filter="url(#glow)"/>
+
+  <!-- Inner hub -->
+  <circle cx="100" cy="100" r="14" fill="url(#node2)" filter="url(#glow)"/>
+
+  <!-- Connecting edges -->
+  <line x1="100" y1="48" x2="148" y2="72" stroke="#334155" stroke-width="2.5"/>
+  <line x1="148" y1="72" x2="158" y2="120" stroke="#334155" stroke-width="2.5"/>
+  <line x1="158" y1="120" x2="130" y2="158" stroke="#334155" stroke-width="2.5"/>
+  <line x1="130" y1="158" x2="85" y2="162" stroke="#334155" stroke-width="2.5"/>
+  <line x1="85" y1="162" x2="52" y2="130" stroke="#334155" stroke-width="2.5"/>
+  <line x1="52" y1="130" x2="48" y2="82" stroke="#334155" stroke-width="2.5"/>
+  <line x1="48" y1="82" x2="100" y2="48" stroke="#334155" stroke-width="2.5"/>
+
+  <!-- Radial connections to hub -->
+  <line x1="100" y1="48" x2="100" y2="100" stroke="#334155" stroke-width="2" opacity="0.5"/>
+  <line x1="148" y1="72" x2="100" y2="100" stroke="#334155" stroke-width="2" opacity="0.5"/>
+  <line x1="158" y1="120" x2="100" y2="100" stroke="#334155" stroke-width="2" opacity="0.5"/>
+  <line x1="130" y1="158" x2="100" y2="100" stroke="#334155" stroke-width="2" opacity="0.5"/>
+  <line x1="85" y1="162" x2="100" y2="100" stroke="#334155" stroke-width="2" opacity="0.5"/>
+  <line x1="52" y1="130" x2="100" y2="100" stroke="#334155" stroke-width="2" opacity="0.5"/>
+  <line x1="48" y1="82" x2="100" y2="100" stroke="#334155" stroke-width="2" opacity="0.5"/>
+
+  <!-- G-shaped accent line (the "G" hidden in the ring) -->
+  <path d="M 70 55 A 60 60 0 1 0 135 50" fill="none" stroke="#3b82f6" stroke-width="3" opacity="0.3" stroke-linecap="round"/>
+</svg>

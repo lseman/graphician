@@ -1022,10 +1022,398 @@ fn extract_python_files(py: Python, files: &Bound<'_, PyList>) -> PyResult<PyObj
     })
 }
 
+// ============================================================================
+// Data Flow Edge Extraction
+// ============================================================================
+
+/// Represents a data flow edge between two named nodes.
+#[derive(Debug, Clone)]
+struct DataFlowEdge {
+    source_id: u64,
+    target_id: u64,
+    source_kind: String,
+    target_kind: String,
+    source_name: String,
+    target_name: String,
+    flow_type: String,
+    source_line: String,
+}
+
+/// Extract data flow edges from a function/method body.
+///
+/// Scans the source text for assignment patterns, parameter usage,
+/// and return statements. Emits DataFlow edges between variables
+/// and between variables and their containing function.
+///
+/// Returns a list of DataFlowEdge dicts for the Python wrapper.
+#[pyfunction]
+#[pyo3(signature = (source_text, function_id, params=None))]
+fn extract_data_flow(
+    py: Python,
+    source_text: &str,
+    function_id: u64,
+    params: Option<&Bound<'_, PyAny>>,
+) -> PyResult<PyObject> {
+    let params_list: Vec<String> = match params {
+        Some(pl) => {
+            let list = pl.downcast::<PyList>().map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!("params must be a list: {}", e))
+            })?;
+            list.iter()
+                .map(|p| p.extract::<String>().unwrap_or_default())
+                .collect()
+        }
+        None => extract_params(source_text),
+    };
+
+    let edges: Vec<DataFlowEdge> = {
+        let mut edges = extract_assignments(source_text, function_id, &params_list);
+        edges.extend(extract_return_flow(source_text, function_id, &params_list));
+        edges
+    };
+
+    // Convert to Python list of dicts
+    let edges_list = PyList::empty(py);
+    for edge in &edges {
+        let dict = PyDict::new(py);
+        dict.set_item("source_id", edge.source_id)?;
+        dict.set_item("target_id", edge.target_id)?;
+        dict.set_item("source_kind", &edge.source_kind)?;
+        dict.set_item("target_kind", &edge.target_kind)?;
+        dict.set_item("source_name", &edge.source_name)?;
+        dict.set_item("target_name", &edge.target_name)?;
+        dict.set_item("flow_type", &edge.flow_type)?;
+        dict.set_item("source_text", &edge.source_line)?;
+        edges_list.append(dict)?;
+    }
+
+    let output = PyDict::new(py);
+    output.set_item("edges", edges_list)?;
+    output.set_item("count", edges.len())?;
+    Ok(output.into_any().unbind().into())
+}
+
+/// Extract assignment edges: `let/var/mut x = expr` or `x = expr`.
+fn extract_assignments(
+    source_text: &str,
+    function_id: u64,
+    params: &[String],
+) -> Vec<DataFlowEdge> {
+    let mut edges = Vec::new();
+    let lines: Vec<&str> = source_text.lines().collect();
+
+    for line in lines.iter() {
+        let trimmed = line.trim();
+
+        // Skip comments
+        if trimmed.starts_with("//") || trimmed.starts_with("#") || trimmed.starts_with("/*") {
+            continue;
+        }
+
+        // Pattern: `let [mut] var: Type = expr` or `let [mut] var = expr`
+        // or `var = expr` (reassignment)
+        if let Some((var_name, expr)) = parse_assignment(trimmed) {
+            if var_name.is_empty() || var_name.starts_with('_') {
+                continue;
+            }
+
+            let var_qn = format!("var::{}::{}", function_id, var_name);
+            let var_id = format_qn_to_id(&var_qn);
+
+            // Emit DataFlow from params if the expression references them
+            for param in params {
+                if expr.contains(param.as_str()) {
+                    let param_qn = format!("param::{}::{}", function_id, param);
+                    let param_id = format_qn_to_id(&param_qn);
+                    edges.push(DataFlowEdge {
+                        source_id: param_id,
+                        target_id: var_id,
+                        source_kind: "param".to_string(),
+                        target_kind: "variable".to_string(),
+                        source_name: param.clone(),
+                        target_name: var_name.clone(),
+                        flow_type: "param_flow".to_string(),
+                        source_line: trimmed.to_string(),
+                    });
+                }
+            }
+
+            // Emit DataFlow from the containing function to the variable
+            edges.push(DataFlowEdge {
+                source_id: function_id,
+                target_id: var_id,
+                source_kind: "function".to_string(),
+                target_kind: "variable".to_string(),
+                source_name: format!("func::{}", function_id),
+                target_name: var_name.clone(),
+                flow_type: "assignment".to_string(),
+                source_line: trimmed.to_string(),
+            });
+        }
+    }
+
+    edges
+}
+
+/// Parse an assignment from a line of code.
+/// Returns (variable_name, expression) or None.
+/// Handles: let/var/mut x = expr, x = expr, self.field = expr
+fn parse_assignment(line: &str) -> Option<(String, String)> {
+    let mut s = line.trim().to_string();
+
+    // Strip leading `self.` for Python field assignments
+    if s.starts_with("self.") {
+        s = s[5..].to_string();
+    }
+
+    // Strip `let ` prefix
+    if s.starts_with("let ") {
+        s = s[4..].to_string();
+    }
+
+    // Strip `mut ` prefix (Rust) — after `let` so `let mut x` works
+    if s.starts_with("mut ") {
+        s = s[4..].to_string();
+    }
+
+    // Find the equals sign
+    let eq_pos = s.find('=')?;
+    let before_eq = s[..eq_pos].trim();
+    let after_eq = s[eq_pos + 1..].trim();
+
+    // Handle `var: Type` — strip everything after ':'
+    let var_name = if let Some(colon_pos) = before_eq.find(':') {
+        before_eq[..colon_pos].trim().to_string()
+    } else {
+        before_eq.to_string()
+    };
+
+    if var_name.is_empty() || var_name.starts_with('_') {
+        return None;
+    }
+
+    Some((var_name, after_eq.to_string()))
+}
+
+/// Extract return value flow: `return expr` where expr references a known node.
+fn extract_return_flow(
+    source_text: &str,
+    function_id: u64,
+    params: &[String],
+) -> Vec<DataFlowEdge> {
+    let mut edges = Vec::new();
+    let lines: Vec<&str> = source_text.lines().collect();
+
+    for line in lines.iter() {
+        let trimmed = line.trim();
+
+        // Skip comments
+        if trimmed.starts_with("//") || trimmed.starts_with("#") {
+            continue;
+        }
+
+        // Match: `return expr`, `return expr,` (tuple), `return Some(expr)`
+        if let Some(return_expr) = parse_return(trimmed) {
+            if return_expr.is_empty() {
+                continue;
+            }
+
+            let return_qn = format!("return::{}", function_id);
+            let return_id = format_qn_to_id(&return_qn);
+
+            // Check if return value references a parameter
+            for param in params {
+                if return_expr.contains(param.as_str()) {
+                    let param_qn = format!("param::{}::{}", function_id, param);
+                    let param_id = format_qn_to_id(&param_qn);
+                    edges.push(DataFlowEdge {
+                        source_id: param_id,
+                        target_id: return_id,
+                        source_kind: "param".to_string(),
+                        target_kind: "return_value".to_string(),
+                        source_name: param.clone(),
+                        target_name: "return_value".to_string(),
+                        flow_type: "return_flow".to_string(),
+                        source_line: trimmed.to_string(),
+                    });
+                }
+            }
+
+            // Emit DataFlow from function to its return value
+            edges.push(DataFlowEdge {
+                source_id: function_id,
+                target_id: return_id,
+                source_kind: "function".to_string(),
+                target_kind: "return_value".to_string(),
+                source_name: format!("func::{}", function_id),
+                target_name: "return_value".to_string(),
+                flow_type: "return_flow".to_string(),
+                source_line: trimmed.to_string(),
+            });
+        }
+    }
+
+    edges
+}
+
+/// Parse a return statement, extracting the expression after `return`.
+fn parse_return(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+
+    // Match `return expr`, `return expr;`, `return (expr)`
+    if trimmed.starts_with("return ") || trimmed.starts_with("return\t") {
+        let after = &trimmed[7..]; // skip "return "
+        let expr = after.trim_end_matches(';').trim();
+        Some(expr.to_string())
+    } else if trimmed == "return" {
+        Some(String::new())
+    } else {
+        None
+    }
+}
+
+/// Convert a qualified name to a deterministic ID for tracking.
+fn format_qn_to_id(qn: &str) -> u64 {
+    // Simple hash-based ID for tracking variable nodes
+    let mut hash: u64 = 0;
+    for byte in qn.bytes() {
+        hash = hash.wrapping_mul(31).wrapping_add(byte as u64);
+    }
+    hash
+}
+
+/// Build a parameter list from a function's source text.
+/// Extracts parameter names from function signatures.
+pub fn extract_params(source_text: &str) -> Vec<String> {
+    let mut params = Vec::new();
+
+    // Find the function signature (first line with `fn` or `def`)
+    for line in source_text.lines() {
+        let trimmed = line.trim();
+
+        // Rust: `fn name(args) {` or `fn name(&self, args) {`
+        if trimmed.starts_with("fn ") || trimmed.starts_with("pub fn ") {
+            if let Some(args) = extract_rust_params(trimmed) {
+                params.extend(args);
+            }
+            break;
+        }
+
+        // Python: `def name(args):`
+        if trimmed.starts_with("def ") || trimmed.starts_with("async def ") {
+            if let Some(args) = extract_python_params(trimmed) {
+                params.extend(args);
+            }
+            break;
+        }
+
+        // TypeScript/JS: `function name(args)` or class methods
+        if trimmed.starts_with("function ")
+            || trimmed.starts_with("public ")
+            || trimmed.starts_with("private ")
+            || trimmed.starts_with("protected ")
+        {
+            if let Some(args) = extract_ts_params(trimmed) {
+                params.extend(args);
+            }
+            break;
+        }
+    }
+
+    params
+}
+
+fn extract_rust_params(line: &str) -> Option<Vec<String>> {
+    let paren_start = line.find('(')?;
+    let paren_end = line.find(')')?;
+    let args = &line[paren_start + 1..paren_end];
+
+    let mut params = Vec::new();
+    for arg in args.split(',') {
+        let arg = arg.trim();
+        if arg.is_empty() || arg == "self" || arg == "&self" || arg == "&mut self" {
+            continue;
+        }
+        let name = arg.split([':', '=']).next().unwrap_or(arg).trim().to_string();
+        let name = name.strip_prefix("&mut ")
+            .or_else(|| name.strip_prefix("&"))
+            .unwrap_or(&name)
+            .trim()
+            .to_string();
+        if !name.is_empty() && !name.starts_with('_') {
+            params.push(name);
+        }
+    }
+
+    if params.is_empty() {
+        None
+    } else {
+        Some(params)
+    }
+}
+
+fn extract_python_params(line: &str) -> Option<Vec<String>> {
+    let paren_start = line.find('(')?;
+    let paren_end = line.find(')')?;
+    let args = &line[paren_start + 1..paren_end];
+
+    let mut params = Vec::new();
+    for arg in args.split(',') {
+        let arg = arg.trim();
+        if arg.is_empty() || arg == "self" || arg == "cls" {
+            continue;
+        }
+        let name = arg.split([':', '=']).next().unwrap_or(arg).trim().to_string();
+        let name = name.trim().to_string();
+        if !name.is_empty() && !name.starts_with('_') {
+            params.push(name);
+        }
+    }
+
+    if params.is_empty() {
+        None
+    } else {
+        Some(params)
+    }
+}
+
+fn extract_ts_params(line: &str) -> Option<Vec<String>> {
+    let paren_start = line.find('(')?;
+    let paren_end = line.find(')')?;
+    let args = &line[paren_start + 1..paren_end];
+
+    let mut params = Vec::new();
+    for arg in args.split(',') {
+        let arg = arg.trim();
+        if arg.is_empty() {
+            continue;
+        }
+        let name = arg.split([':', '=']).next().unwrap_or(arg).trim().to_string();
+        let name = name.strip_prefix("public ")
+            .or_else(|| name.strip_prefix("private "))
+            .or_else(|| name.strip_prefix("protected "))
+            .unwrap_or(&name)
+            .trim()
+            .to_string();
+        let name = name.strip_suffix('?').unwrap_or(&name).trim().to_string();
+        if name == "this" || name.is_empty() || name.starts_with('_') {
+            continue;
+        }
+        params.push(name);
+    }
+
+    if params.is_empty() {
+        None
+    } else {
+        Some(params)
+    }
+}
+
 #[pymodule]
 fn graphician_extract(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(extract_python_file, m)?)?;
     m.add_function(wrap_pyfunction!(extract_python_files, m)?)?;
+    m.add_function(wrap_pyfunction!(extract_data_flow, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add_function(wrap_pyfunction!(available, m)?)?;
     m.add("__doc__", "High-performance Python code extraction using tree-sitter Rust bindings")?;

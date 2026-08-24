@@ -24,6 +24,7 @@ if _lib_path.exists():
     _spec.loader.exec_module(_mod)
     extract_python_file = _mod.extract_python_file
     extract_python_files = _mod.extract_python_files
+    extract_data_flow = _mod.extract_data_flow
     available = _mod.available
     version = _mod.version
     HAS_RUST = True
@@ -31,7 +32,8 @@ else:
     HAS_RUST = False
     extract_python_file = None
     extract_python_files = None
+    extract_data_flow = None
     available = lambda: False
     version = lambda: "0.0.0"
 
-__all__ = ["extract_python_file", "extract_python_files", "available", "version", "HAS_RUST"]
+__all__ = ["extract_python_file", "extract_python_files", "extract_data_flow", "available", "version", "HAS_RUST"]

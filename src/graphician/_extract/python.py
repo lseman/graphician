@@ -25,6 +25,7 @@ if HAS_RUST:
     from . import (
         extract_python_file as _rust_extract_single,
         extract_python_files as _rust_extract_parallel,
+        extract_data_flow as _rust_extract_data_flow,
     )
 
 
@@ -295,3 +296,139 @@ def extract_python_files(
         if receiver:
             edge = edge.with_property("call_receiver", receiver)
         graph.add_edge(caller_id, callee_id, edge)
+
+
+def extract_data_flow(
+    graph: Graph,
+    function_id: NodeId,
+    source_text: str,
+    params: list[str] | None = None,
+) -> int:
+    """Extract data flow edges from a function/method body using Rust.
+
+    Uses the Rust-accelerated data flow extraction if available,
+    falling back to the Python implementation otherwise.
+
+    Args:
+        graph: The graph to add data flow edges to.
+        function_id: The ID of the function/method node.
+        source_text: The source code of the function body.
+        params: Optional list of parameter names. If None, auto-extracted.
+
+    Returns:
+        Number of data flow edges added.
+    """
+    if not HAS_RUST:
+        # Fallback to Python implementation
+        from graphician.extraction.data_flow import (
+            extract_data_flow as _python_extract,
+        )
+        return _python_extract(graph, function_id, source_text, params)
+
+    # Call the Rust data flow extraction
+    result = _rust_extract_data_flow(
+        source_text=source_text,
+        function_id=function_id.value,
+        params=params if params is not None else [],
+    )
+
+    # Create variable nodes and emit DataFlow edges
+    count = 0
+    for edge_data in result.get("edges", []):
+        flow_type = edge_data.get("flow_type", "")
+        source_name = edge_data.get("source_name", "")
+        target_name = edge_data.get("target_name", "")
+        source_text_line = edge_data.get("source_text", "")
+
+        # Determine source and target QNs
+        if flow_type in ("param_flow", "return_flow"):
+            # For param/return flow, create param or return nodes
+            source_id = _ensure_param_node(
+                graph, function_id, source_name, source_text_line
+            )
+            if flow_type == "return_flow":
+                target_id = _ensure_return_node(graph, function_id, source_text_line)
+            else:
+                target_id = _ensure_var_node(
+                    graph, function_id, target_name, source_text_line
+                )
+        elif flow_type == "assignment":
+            # For assignment flow, function -> var
+            source_id = function_id
+            target_id = _ensure_var_node(
+                graph, function_id, target_name, source_text_line
+            )
+        else:
+            continue
+
+        if source_id is not None and target_id is not None:
+            if not graph.has_edge_kind(source_id, target_id, EdgeKind.DATA_FLOW):
+                graph.add_edge(source_id, target_id, Edge.extracted(EdgeKind.DATA_FLOW))
+                count += 1
+
+    return count
+
+
+def _ensure_param_node(
+    graph: Graph,
+    function_id: NodeId,
+    param_name: str,
+    source_line: str,
+) -> NodeId | None:
+    """Ensure a parameter variable node exists."""
+    qn = f"param::{function_id.value}::{param_name}"
+    existing = graph.find_by_qname(qn)
+    if existing is not None:
+        return existing
+    node = Node(
+        kind=NodeKind.VARIABLE,
+        name=param_name,
+        qualified_name=qn,
+    ).with_property("function_id", str(function_id.value))
+    if source_line:
+        node = node.with_source_text(source_line)
+    graph.add_node(node)
+    return graph.find_by_qname(qn)
+
+
+def _ensure_return_node(
+    graph: Graph,
+    function_id: NodeId,
+    source_line: str,
+) -> NodeId | None:
+    """Ensure a return value node exists."""
+    qn = f"return::{function_id.value}"
+    existing = graph.find_by_qname(qn)
+    if existing is not None:
+        return existing
+    node = Node(
+        kind=NodeKind.VARIABLE,
+        name="return_value",
+        qualified_name=qn,
+    ).with_property("function_id", str(function_id.value))
+    if source_line:
+        node = node.with_source_text(source_line)
+    graph.add_node(node)
+    return graph.find_by_qname(qn)
+
+
+def _ensure_var_node(
+    graph: Graph,
+    function_id: NodeId,
+    var_name: str,
+    source_line: str,
+) -> NodeId | None:
+    """Ensure a variable node exists."""
+    qn = f"var::{function_id.value}::{var_name}"
+    existing = graph.find_by_qname(qn)
+    if existing is not None:
+        return existing
+    node = Node(
+        kind=NodeKind.VARIABLE,
+        name=var_name,
+        qualified_name=qn,
+    ).with_property("function_id", str(function_id.value))
+    if source_line:
+        node = node.with_source_text(source_line)
+    graph.add_node(node)
+    return graph.find_by_qname(qn)

@@ -1,10 +1,6 @@
 [build-system]
-requires = ["hatchling", "maturin>=1.0,<2.0"]
-build-backend = "maturin"
-
-[tool.maturin]
-features = ["pyo3/extension-module"]
-module-name = "graphician._extract.graphician_extract"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "graphician"

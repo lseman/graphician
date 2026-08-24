@@ -1,6 +1,10 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["hatchling", "maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "graphician._extract.graphician_extract"
 
 [project]
 name = "graphician"
@@ -18,6 +22,9 @@ dependencies = [
     "networkx>=3.3",
     "numpy>=1.26",
 ]
+
+[project.optional-dependencies]
+rust-extract = ["graphician-extract"]
 
 [project.scripts]
 graphician = "graphician.interfaces.cli:main"

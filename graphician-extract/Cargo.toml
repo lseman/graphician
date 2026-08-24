@@ -1,0 +1,22 @@
+[package]
+name = "graphician-extract"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance code extraction using tree-sitter Rust bindings"
+
+[lib]
+name = "graphician_extract"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.25", features = ["extension-module", "abi3-py311"] }
+tree-sitter = "0.26"
+tree-sitter-python = "0.25"
+serde_json = "1.0"
+
+[dependencies.pyo3-ffi]
+version = "0.25"
+
+[profile.release]
+opt-level = 3
+lto = "thin"

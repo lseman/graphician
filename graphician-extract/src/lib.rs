@@ -227,21 +227,236 @@ struct ExtractionResult {
     calls: Vec<CallPlaceholder>,
 }
 
-fn should_suppress(name: &str) -> bool {
+/// Heuristics for recognising test code.
+pub fn is_test_file_path(path: &str) -> bool {
+    let s = path.replace('\\', "/");
+
+    // Directory components
+    if s.contains("/tests/")
+        || s.contains("/test/")
+        || s.starts_with("tests/")
+        || s.starts_with("test/")
+        || s.contains("/__tests__/")
+        || s.starts_with("__tests__/")
+        || s.contains("/spec/")
+        || s.starts_with("spec/")
+    {
+        return true;
+    }
+
+    let stem = std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+
+    if stem.starts_with("test_")
+        || stem.ends_with("_test")
+        || stem.ends_with("_spec")
+        || stem.ends_with(".test")
+        || stem.ends_with(".spec")
+    {
+        return true;
+    }
+
+    let stem_lower = stem.to_ascii_lowercase();
+    if stem_lower.starts_with("test_helper") || stem_lower.starts_with("test_helpers") {
+        return true;
+    }
+
+    // Extension-gated suffix conventions
+    match ext {
+        "java" | "cs" | "php" => {
+            stem.ends_with("Test") || stem.ends_with("Tests")
+        }
+        "kt" | "swift" => {
+            stem.ends_with("Test") || stem.ends_with("Tests") || stem.ends_with("Spec")
+        }
+        "scala" => {
+            stem.ends_with("Spec") || stem.ends_with("Suite") || stem.ends_with("Test")
+        }
+        "dart" => stem_lower.starts_with("test_") || stem_lower.ends_with("_test"),
+        "lua" => {
+            stem_lower.starts_with("test_")
+                || stem_lower.ends_with("_test")
+                || stem_lower.ends_with("_spec")
+        }
+        _ => false,
+    }
+}
+
+/// Test the *symbol name*. True if the function/method name follows a
+/// test convention.
+pub fn is_test_name(name: &str) -> bool {
+    if name.starts_with("test_") || name.starts_with("Test_") {
+        return true;
+    }
+    if name.ends_with("_test") || name.ends_with("_spec") {
+        return true;
+    }
+    // `XxxTest` — only if there's something *before* `Test`
+    if name.len() > 4 && name.ends_with("Test") {
+        return true;
+    }
+    // BDD style: `should*`, `it*`, `given*` followed by capital
+    let starts_camel = |prefix: &str| -> bool {
+        name.strip_prefix(prefix)
+            .and_then(|rest| rest.chars().next())
+            .map(|c| c.is_ascii_uppercase())
+            .unwrap_or(false)
+    };
+    if starts_camel("should") || starts_camel("it") || starts_camel("given") {
+        return true;
+    }
+    // `Test[A-Z]…`: TestLogin, TestAuthRefresh, etc.
+    if name
+        .strip_prefix("Test")
+        .and_then(|rest| rest.chars().next())
+        .map(|c| c.is_ascii_uppercase())
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    false
+}
+
+fn should_suppress_call_placeholder(name: &str) -> bool {
+    let name = name.trim();
+    if name.is_empty() {
+        return true;
+    }
+    let lower = name.to_ascii_lowercase();
     matches!(
-        name,
-        "print" | "len" | "range" | "super" | "property" | "staticmethod"
-        | "classmethod" | "isinstance" | "issubclass" | "type" | "getattr"
-        | "setattr" | "hasattr" | "delattr" | "repr" | "str" | "int"
-        | "float" | "list" | "dict" | "set" | "tuple" | "bool" | "bytes"
-        | "bytearray" | "frozenset" | "enumerate" | "zip" | "map" | "filter"
-        | "sorted" | "reversed" | "any" | "all" | "abs" | "round" | "min"
-        | "max" | "sum" | "pow" | "divmod" | "chr" | "ord" | "hex" | "oct"
-        | "bin" | "format" | "hash" | "id" | "input" | "open" | "compile"
-        | "eval" | "exec" | "dir" | "vars" | "help" | "callable"
-        | "memoryview" | "slice" | "complex" | "object" | "next" | "iter"
-        | "breakpoint"
+        lower.as_str(),
+        // Python builtins and common constructors.
+        "abs" | "all" | "any" | "bool" | "bytes" | "callable"
+            | "dict" | "dir" | "enumerate" | "filter" | "float"
+            | "getattr" | "hasattr" | "hash" | "id" | "int" | "isinstance"
+            | "iter" | "len" | "list" | "map" | "max" | "min" | "next"
+            | "open" | "print" | "range" | "repr" | "reversed" | "round"
+            | "set" | "sorted" | "str" | "sum" | "super" | "tuple"
+            | "type" | "vars" | "zip"
+        // Rust/std/common fluent API calls.
+        | "and_then" | "as_bytes" | "as_deref" | "as_ref" | "as_str"
+        | "chars" | "clone" | "cloned" | "clamp" | "collect"
+        | "contains" | "ends_with" | "err" | "expect" | "filter_map"
+        | "flat_map" | "fold" | "from" | "get_mut" | "into"
+        | "into_iter" | "is_empty" | "is_none" | "is_some_and"
+        | "iter_mut" | "lines" | "map_err" | "none" | "ok" | "ok_or"
+        | "ok_or_else" | "or_default" | "push_str" | "rsplit" | "some"
+        | "splitn" | "starts_with" | "to_owned" | "to_string"
+        | "to_string_lossy" | "from_str" | "trim" | "unwrap"
+        | "unwrap_or" | "unwrap_or_default" | "unwrap_or_else"
+        | "with_capacity"
+        // std::collections / std::vec methods
+        | "sort_by" | "sort_by_key" | "sort_unstable" | "truncate"
+        | "reserve" | "contains_key" | "concat" | "to_vec"
+        // std::io / std::fs methods
+        | "read_to_string" | "read_to_end" | "remove_dir_all"
+        | "remove_file" | "create_dir_all" | "exists" | "write_all"
+        | "flush"
+        // std trait methods
+        | "fg"
+        // std::env
+        | "temp_dir" | "args"
+        // std::string methods
+        | "strip_prefix" | "to_ascii_lowercase" | "trim_matches"
+        // std::option
+        | "is_some" | "or_else"
+        // std::collections
+        | "values_mut" | "borrow"
+        // std::collections
+        | "pop_front" | "push_back" | "to_lowercase" | "to_uppercase"
+        | "split_whitespace" | "saturating_sub" | "to_string_pretty"
+        | "as_array" | "as_u64"
+        // std::path
+        | "file_name" | "file_stem"
+        // std::num
+        | "wrapping_add"
+        // std::fs
+        | "current_dir"
+        // serde_json
+        | "as_bool" | "as_f64" | "as_object"
+        // external lib symbols
+        | "render_widget" | "highlight_style" | "border_style" | "borders"
+        | "checkAvailable" | "percentage" | "strip_suffix"
+        | "trim_end_matches" | "chunks" | "or_insert" | "or_insert_with"
+        // SQLite rusqlite bindings
+        | "query_map" | "prepare" | "transaction" | "selected"
+        | "query_row" | "add_modifier"
+        // std::time methods
+        | "duration_since" | "as_nanos"
+        // std::num
+        | "saturating_add" | "wrapping_mul"
+        // std::path
+        | "extension"
+        // Confidence enum variant leaking as unresolved
+        | "inferred"
+        // Common graph-library traversal/mutation helpers.
+        | "contains_node" | "edge_indices" | "edge_references"
+        | "edge_weight_mut" | "edges_directed" | "node_indices"
+        | "node_weight" | "node_weight_mut"
+        // std::fs::DirEntry / std::path methods
+        | "to_path_buf" | "is_dir" | "is_file" | "filter_entry"
+        // C/C++ and libc-style calls.
+        | "malloc" | "free" | "printf" | "fprintf" | "memcpy" | "memset"
+        | "strlen" | "strcmp" | "std"
+        // tree-sitter Node API
+        | "child_by_field_name" | "children" | "end_position"
+        | "is_named" | "language_typescript" | "language_tsx" | "root_node"
+        | "start_position" | "walk" | "utf8_text"
+        // tree-sitter Parser API
+        | "set_language" | "included_ranges"
+        // Additional tree-sitter / std methods
+        | "rev" | "nth" | "to_str" | "last_mut" | "trim_start"
+        | "from_utf8" | "windows" | "end_byte" | "start_byte"
+        | "is_ascii_digit" | "is_lowercase" | "is_uppercase"
+        | "is_alphanumeric" | "new_ext" | "reverse" | "next_back"
+        | "as_array_mut"
+        // Ariadne internal methods
+        | "resolve_mentions" | "original_nodes" | "edges_mut" | "qname_index"
+        // Additional stdlib/external
+        | "is_err" | "is_ok" | "read_dir" | "from_secs" | "trim_start_matches"
+        | "from_utf8_lossy" | "Object" | "json"
+        // Python builtins not in original list
+        | "property" | "staticmethod" | "classmethod" | "issubclass"
+        | "setattr" | "delattr" | "bytearray" | "frozenset"
+        | "divmod" | "chr" | "ord" | "hex" | "oct" | "bin" | "format"
+        | "input" | "compile" | "eval" | "exec" | "help" | "memoryview"
+        | "slice" | "complex" | "object" | "breakpoint"
     )
+}
+
+/// Common short English verbs/nouns that dominate noise in *most*
+/// codebases as stdlib/fluent-API calls, but collide with real method
+/// names often enough (`Repository::select`, `Service::execute`,
+/// `Config::merge`) that they must not be dropped before the project's
+/// symbol table exists.
+pub fn is_generic_name(name: &str) -> bool {
+    let name = name.trim();
+    if name.is_empty() {
+        return true;
+    }
+    let lower = name.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "get" | "find" | "insert" | "remove" | "push" | "pop"
+            | "select" | "execute" | "merge" | "load" | "write" | "read"
+            | "path" | "add" | "string" | "new" | "index" | "join"
+            | "take" | "has" | "display" | "now" | "entry" | "default"
+            | "count" | "first" | "last" | "position" | "split"
+            | "replace" | "clear" | "values" | "node" | "text" | "parse"
+            | "kind" | "parent" | "language" | "status" | "watch"
+            | "commit" | "block" | "attr"
+    )
+}
+
+/// Combined suppression: strict list or generic name.
+pub fn should_suppress(name: &str) -> bool {
+    should_suppress_call_placeholder(name) || is_generic_name(name)
 }
 
 fn emit_imports(
@@ -348,7 +563,7 @@ fn emit_calls(
                     _ => {}
                 }
                 if let Some(n) = name {
-                    if !n.starts_with('_') && !should_suppress(&n) {
+                    if !n.starts_with('_') && !should_suppress_call_placeholder(&n) {
                         let callee_qn = format!("call::{}", n);
                         result.calls.push(CallPlaceholder {
                             caller_qn: caller_qn.to_string(),
@@ -520,7 +735,7 @@ fn handle_function(
         Some(n) => n,
         None => return,
     };
-    let is_test = file_is_test || name.starts_with("test_") || name.ends_with("_test");
+    let is_test = file_is_test || is_test_name(&name);
     let child_scope: Vec<String> = scope.iter().cloned().chain(Some(name.clone())).collect();
     let qn = format!("{}::{}", file_qn, child_scope.join("::"));
     let mut props: Vec<(String, String)> = Vec::new();
@@ -604,7 +819,7 @@ fn extract_python(source: &[u8], file_path: &str, file_qn: &str) -> Result<Extra
         properties: vec![("dialect".to_string(), "python".to_string())],
     });
     emit_imports(&root, source, &file_qn_full, &mut result);
-    let file_is_test = file_name.starts_with("test_") || file_name.ends_with("_test");
+    let file_is_test = is_test_file_path(file_path) || is_test_file_path(&format!("/{}", file_path));
     walk_scope(&root, &file_qn_full, file_path, &file_qn_full, &[], false, file_is_test, source, &mut result);
     Ok(result)
 }
@@ -716,5 +931,111 @@ mod tests {
         let result = extract_python(source, "test.py", "file::test").unwrap();
         let imports: Vec<_> = result.edges.iter().filter(|e| e.kind == "imports").collect();
         assert!(!imports.is_empty());
+    }
+
+    // ===== Test detection tests =====
+
+    #[test]
+    fn detects_python_test_files() {
+        assert!(is_test_file_path("tests/test_auth.py"));
+        assert!(is_test_file_path("project/tests/foo.py"));
+        assert!(is_test_file_path("src/test_auth.py"));
+        assert!(!is_test_file_path("src/auth.py"));
+    }
+
+    #[test]
+    fn detects_js_test_files() {
+        assert!(is_test_file_path("src/auth.test.ts"));
+        assert!(is_test_file_path("src/auth.spec.js"));
+        assert!(is_test_file_path("__tests__/auth.js"));
+    }
+
+    #[test]
+    fn detects_common_xunit_and_spec_files() {
+        assert!(is_test_file_path("src/FooTest.java"));
+        assert!(is_test_file_path("src/FooTests.kt"));
+        assert!(is_test_file_path("src/FooSpec.swift"));
+        assert!(is_test_file_path("src/FooSuite.scala"));
+        assert!(is_test_file_path("src/FooTest.cs"));
+        assert!(is_test_file_path("src/FooTest.php"));
+        assert!(!is_test_file_path("src/Contest.java"));
+        assert!(!is_test_file_path("src/Latest.kt"));
+    }
+
+    #[test]
+    fn detects_test_names() {
+        assert!(is_test_name("test_login"));
+        assert!(is_test_name("TestLogin"));
+        assert!(is_test_name("login_test"));
+        assert!(is_test_name("login_spec"));
+        assert!(is_test_name("shouldRejectExpiredTokens"));
+        assert!(is_test_name("itReturnsNullForMissingUser"));
+        assert!(!is_test_name("login"));
+        assert!(!is_test_name("Test")); // bare Test is often a type
+        assert!(!is_test_name("Testimony"));
+        assert!(!is_test_name("should")); // bare verb
+    }
+
+    // ===== Suppression list tests =====
+
+    #[test]
+    fn should_suppress_python_builtins() {
+        assert!(should_suppress_call_placeholder("print"));
+        assert!(should_suppress_call_placeholder("len"));
+        assert!(should_suppress_call_placeholder("range"));
+        assert!(should_suppress_call_placeholder("super"));
+        assert!(should_suppress_call_placeholder("isinstance"));
+    }
+
+    #[test]
+    fn should_suppress_rust_std() {
+        assert!(should_suppress_call_placeholder("and_then"));
+        assert!(should_suppress_call_placeholder("unwrap"));
+        assert!(should_suppress_call_placeholder("collect"));
+        assert!(should_suppress_call_placeholder("to_string"));
+        assert!(should_suppress_call_placeholder("expect"));
+    }
+
+    #[test]
+    fn should_suppress_tree_sitter_api() {
+        assert!(should_suppress_call_placeholder("child_by_field_name"));
+        assert!(should_suppress_call_placeholder("root_node"));
+        assert!(should_suppress_call_placeholder("start_position"));
+        assert!(should_suppress_call_placeholder("walk"));
+    }
+
+    #[test]
+    fn should_not_suppress_project_functions() {
+        assert!(!should_suppress_call_placeholder("login"));
+        assert!(!should_suppress_call_placeholder("extract_file"));
+        assert!(!should_suppress_call_placeholder("add_node"));
+        assert!(!should_suppress_call_placeholder("add_edge"));
+    }
+
+    #[test]
+    fn is_generic_name_flags_common_verbs() {
+        assert!(is_generic_name("get"));
+        assert!(is_generic_name("execute"));
+        assert!(is_generic_name("select"));
+        assert!(is_generic_name("merge"));
+        assert!(is_generic_name("new"));
+        assert!(is_generic_name("path"));
+    }
+
+    #[test]
+    fn is_generic_name_does_not_flag_strict_list() {
+        assert!(!is_generic_name("child_by_field_name"));
+        assert!(!is_generic_name("printf"));
+    }
+
+    #[test]
+    fn combined_suppression_catches_both_tiers() {
+        // Strict list
+        assert!(should_suppress("unwrap"));
+        // Generic name
+        assert!(should_suppress("get"));
+        // Real project function — should NOT be suppressed
+        assert!(!should_suppress("login"));
+        assert!(!should_suppress("extract_file"));
     }
 }

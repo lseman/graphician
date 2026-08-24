@@ -22,9 +22,11 @@ RUSTC    := $(shell which cargo 2>/dev/null || echo "")
 CARGO    := $(RUSTC:cargo=%/cargo)
 
 # Derived paths
-EXTRACT_DIR := graphician-extract
+NATIVE_DIR  := graphician-native
 SO_DIR      := src/graphician/_extract
-SO_FILE     := $(SO_DIR)/graphician_extract.cpython-314-x86_64-linux-gnu.so
+# PyO3 targets abi3-py311, so one extension works on every supported CPython
+# version instead of embedding the build interpreter's minor version.
+SO_FILE     := $(SO_DIR)/graphician_native.abi3.so
 
 # ------------------------------------------------------------------
 # help
@@ -44,12 +46,12 @@ help:
 # ------------------------------------------------------------------
 build: $(SO_FILE)
 
-$(SO_FILE): $(EXTRACT_DIR)/src/lib.rs $(EXTRACT_DIR)/Cargo.toml
-	@echo "→ Building graphician-extract (release)..."
-	cd $(EXTRACT_DIR) && cargo build --release
+$(SO_FILE): $(NATIVE_DIR)/src/lib.rs $(NATIVE_DIR)/Cargo.toml
+	@echo "→ Building graphician-native (release)..."
+	cd $(NATIVE_DIR) && cargo build --release
 	@echo "→ Copying .so → $(SO_FILE)..."
 	mkdir -p $(SO_DIR)
-	cp $(EXTRACT_DIR)/target/release/libgraphician_extract.so $(SO_FILE)
+	cp $(NATIVE_DIR)/target/release/libgraphician_native.so $(SO_FILE)
 	@echo "✓ Build complete"
 
 # ------------------------------------------------------------------
@@ -68,7 +70,7 @@ test: build
 # ------------------------------------------------------------------
 clean:
 	@echo "→ Cleaning..."
-	@rm -rf $(EXTRACT_DIR)/target
+	@rm -rf $(NATIVE_DIR)/target
 	@rm -rf $(SO_DIR)/*.so
 	@rm -rf $(SO_DIR)/__pycache__
 	@rm -rf .pytest_cache

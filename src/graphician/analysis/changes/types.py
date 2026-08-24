@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -18,12 +19,32 @@ class Change:
 
 
 @dataclass
+class RiskFactor:
+    """A single risk factor and its computed contribution."""
+    name: str
+    weight: float
+    score: float
+
+
+@dataclass
 class RiskScore:
-    """Risk assessment for a symbol."""
+    """Risk assessment for a symbol.
+
+    Uses the CRG-style 5-factor model:
+    - flow_participation (max 0.25)
+    - community_crossing (max 0.15)
+    - test_coverage (max 0.30)
+    - security_sensitivity (max 0.20)
+    - caller_count (max 0.10)
+    """
     qualified_name: str
     kind: str
     overall: float
-    structural: float
-    test: float
-    security: float
+    level: str = "LOW"
+    factors: list[dict[str, Any]] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
+
+    # Legacy fields for API compatibility
+    structural: float = 0.0
+    test: float = 0.0
+    security: float = 0.0

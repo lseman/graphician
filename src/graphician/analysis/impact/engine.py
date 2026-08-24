@@ -18,6 +18,27 @@ def find_impact(graph: Graph, query: ImpactQuery) -> list[ImpactHit]:
 
     Returns hits sorted by score descending (highest impact first).
     """
+    from ..native import native_graph
+
+    snapshot = native_graph(graph)
+    if snapshot is not None:
+        hits: list[ImpactHit] = []
+        for nid_val, cost, distance, via in snapshot.impact(
+            query.seed_id.value, query.max_hops
+        ):
+            node = graph.node(NodeId(nid_val))
+            if node is None:
+                continue
+            hits.append(ImpactHit(
+                id=NodeId(nid_val),
+                score=_compute_score(node, NodeId(nid_val), cost, distance),
+                distance=distance,
+                via=[EdgeKind(kind) for kind in via],
+                node=node,
+            ))
+        hits.sort(key=lambda hit: (-hit.score, hit.distance))
+        return hits[:query.limit]
+
     heap: list[tuple[float, int, int, tuple[EdgeKind, ...]]] = [
         (0.0, 0, query.seed_id.value, ()),
     ]

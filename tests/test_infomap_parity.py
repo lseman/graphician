@@ -13,6 +13,7 @@ from graphician.analysis.communities.infomap import (
     infomap,
     infomap_with_options,
 )
+from graphician.analysis.communities.native import HAS_RUST, detect_native
 from graphician.core import Edge, EdgeKind, Graph, Node, NodeKind
 
 
@@ -35,6 +36,21 @@ def test_infomap_splits_disconnected_pairs(bidirectional: bool) -> None:
 
     communities = infomap(graph)
 
+    assert communities[a] == communities[b]
+    assert communities[c] == communities[d]
+    assert communities[a] != communities[c]
+
+
+@pytest.mark.skipif(not HAS_RUST, reason="Rust extension is not built")
+def test_native_infomap_splits_disconnected_pairs_without_fallback() -> None:
+    graph = Graph()
+    a, b, c, d = _add_nodes(graph, 4)
+    _connect(graph, a, b)
+    _connect(graph, c, d)
+
+    communities = detect_native(graph, CommunityOptions(), "infomap")
+
+    assert communities is not None
     assert communities[a] == communities[b]
     assert communities[c] == communities[d]
     assert communities[a] != communities[c]

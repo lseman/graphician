@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import math
-import re
-from collections import defaultdict
 from typing import Any
 
+from ..._extract import fuzzy_score_matrix
 from ...core.graph import Graph
-from ...core.id import NodeId
-from ...core.node import Node, NodeKind
+from ...core.node import NodeKind
 from .fuzzy import _fuzzy_score
 from .types import SearchHit, SearchIntent
 from .vocabulary import _extract_query_identifiers, _normalize_identifier, _tokenize
@@ -23,10 +20,16 @@ def ranked_search(
     """In-memory ranked search with fuzzy + topology scoring."""
     qn = _normalize_identifier(query)
     hits: list[SearchHit] = []
+    nodes = list(graph.nodes())
+    native_scores = (
+        fuzzy_score_matrix([qn], [node.name for _, node in nodes])[0]
+        if fuzzy_score_matrix is not None
+        else None
+    )
 
-    for nid, node in graph.nodes():
+    for index, (nid, node) in enumerate(nodes):
         # Score by name similarity
-        score = _fuzzy_score(qn, node.name)
+        score = native_scores[index] if native_scores is not None else _fuzzy_score(qn, node.name)
         # Boost for qualified name match
         if qn in _normalize_identifier(node.qualified_name):
             score *= 1.5
@@ -87,20 +90,28 @@ def task_aware_search(
     identifiers = _extract_query_identifiers(query)
 
     hits: list[SearchHit] = []
-    for nid, node in graph.nodes():
+    nodes = list(graph.nodes())
+    normalized_names = [_normalize_identifier(node.name) for _, node in nodes]
+    native_scores = (
+        fuzzy_score_matrix(identifiers, normalized_names)
+        if fuzzy_score_matrix is not None and identifiers
+        else None
+    )
+    for node_index, (nid, node) in enumerate(nodes):
         score = 0.0
         reasons: list[str] = []
 
         # Name-based scoring
         if identifiers:
-            normalized_name = _normalize_identifier(node.name)
             normalized_qname = _normalize_identifier(node.qualified_name)
             name_score = max(
                 max(
-                    _fuzzy_score(identifier, normalized_name),
+                    native_scores[identifier_index][node_index]
+                    if native_scores is not None
+                    else _fuzzy_score(identifier, normalized_names[node_index]),
                     0.85 if identifier in normalized_qname else 0.0,
                 )
-                for identifier in identifiers
+                for identifier_index, identifier in enumerate(identifiers)
             )
             if name_score > 0:
                 score += name_score * 2.0
@@ -117,9 +128,8 @@ def task_aware_search(
         if intent == SearchIntent.IMPACT:
             if node.kind in (NodeKind.FUNCTION, NodeKind.CLASS):
                 score *= 1.3
-        elif intent == SearchIntent.ARCHITECTURE:
-            if node.kind == NodeKind.MODULE:
-                score *= 1.5
+        elif intent == SearchIntent.ARCHITECTURE and node.kind == NodeKind.MODULE:
+            score *= 1.5
 
         if score > 0.3:
             hits.append(SearchHit(

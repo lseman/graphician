@@ -7,6 +7,8 @@ from graphician.core.graph import Graph
 from graphician.core.id import NodeId
 from graphician.core.node import Node, NodeKind
 from graphician.extraction.call_resolution import (
+    _infer_type_from_let_bindings,
+    _infer_type_from_receiver_expression,
     common_prefix_len,
     module_stem,
     resolve_call_placeholders,
@@ -47,6 +49,16 @@ class TestSuppression:
     def test_empty_name_suppressed(self):
         assert should_suppress_call_placeholder("")
 
+    def test_suppressed_placeholder_is_pruned_from_graph(self):
+        graph = Graph()
+        caller = _make_fn(graph, "file::caller", "main.py")
+        placeholder = _make_fn(graph, "call::len")
+        graph.add_edge(caller, placeholder, Edge.ambiguous(EdgeKind.CALLS))
+
+        assert resolve_call_placeholders(graph) == 0
+        assert graph.find_by_qname("call::len") is None
+        assert list(graph.out_neighbors(caller)) == []
+
 
 class TestHelpers:
     def test_common_prefix_len_exact(self):
@@ -68,6 +80,11 @@ class TestHelpers:
         assert module_stem("web/auth/index.ts") == "auth"
         # lib/main.rs → "main" is a container name → return parent "lib"
         assert module_stem("lib/main.rs") == "lib"
+
+    def test_python_classmethod_constructor_infers_receiver_type(self):
+        source = "node = Node.new(NodeKind.FUNCTION, name)\nnode.with_property('x', 1)"
+        assert _infer_type_from_let_bindings(source, "node") == "Node"
+        assert _infer_type_from_receiver_expression("Node.new(kind, qn).with_source(uri)") == "Node"
 
 
 class TestTier1UniqueName:

@@ -19,21 +19,19 @@ Language-specific stub definitions are organized into separate modules:
 
 from __future__ import annotations
 
-from collections import defaultdict
+from pathlib import Path
 from typing import Any
 
 from ...core.edge import Confidence, Edge, EdgeKind
 from ...core.graph import Graph
-from ...core.id import NodeId
-from ...core.node import NodeKind
+from ...core.id import EdgeId, NodeId
+from ...core.node import Node, NodeKind
 from ..call_resolution import should_suppress_call_placeholder
-
-# Import language-specific stubs from their own modules
-from ._rust_stubs import _RUST_STUBS
-from ._python_stubs import _PYTHON_STUBS
-from ._javascript_stubs import _JAVASCRIPT_STUBS
 from ._cpp_stubs import _CPP_STUBS
+from ._javascript_stubs import _JAVASCRIPT_STUBS
+from ._python_stubs import _PYTHON_STUBS
 from ._receiver_hints import _RECEIVER_HINTS, get_method_disambiguation
+from ._rust_stubs import _RUST_STUBS
 
 
 # ── Stub lookup builder ──────────────────────────────────────────────────
@@ -93,23 +91,40 @@ def _create_stub_node(graph: Graph, type_name: str, dialect: str) -> NodeId | No
     # Find source file for stub node
     source_uri = f"<{dialect}-stdlib:{type_name}>"
 
-    # Create stub node
-    node = {
-        "id": None,  # Will be assigned by add_node
-        "name": type_name,
-        "qualified_name": stub_name,
-        "kind": NodeKind.CLASS,
-        "source_uri": source_uri,
-        "line_start": None,
-        "line_end": None,
-        "source_text": f"Library stub for {type_name} ({dialect})",
-        "valid_from": None,
-        "valid_to": None,
-        "decorators": [],
-        "properties": {"dialect": dialect, "is_stub": True},
-    }
+    node = Node.new(NodeKind.CLASS, stub_name)
+    node = node.with_source(source_uri, 0, 0)
+    node = node.with_source_text(f"Library stub for {type_name} ({dialect})")
+    node = node.with_property("dialect", dialect)
+    node = node.with_property("is_stub", True)
 
     return graph.add_node(node)
+
+
+def _source_dialect(source_uri: str | None) -> str | None:
+    """Infer the caller dialect without guessing across language families."""
+    if not source_uri:
+        return None
+    suffix = Path(source_uri).suffix.lower()
+    if suffix == ".py":
+        return "python"
+    if suffix == ".rs":
+        return "rust"
+    if suffix in {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"}:
+        return "javascript"
+    if suffix in {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp"}:
+        return "cpp"
+    return None
+
+
+def _unresolved_call_edges(graph: Graph) -> int:
+    return sum(
+        1
+        for _, _, target, edge in graph.edges()
+        if edge.kind == EdgeKind.CALLS
+        and (node := graph.node(target)) is not None
+        and node.qualified_name.startswith("call::")
+        and not should_suppress_call_placeholder(node.qualified_name[6:])
+    )
 
 
 # ── Resolver ──────────────────────────────────────────────────────────────
@@ -157,10 +172,11 @@ def resolve_library_stubs(graph: Graph) -> int:
 
     additions = 0
 
-    for eid, src, dst, edge, callee_qn in edge_data:
+    stale_edges: list[EdgeId] = []
+    for eid, src, _dst, edge, callee_qn in edge_data:
         method_name = callee_qn[6:]  # strip "call::"
         candidates = lookup.get(method_name)
-        
+
         # If method not found in lookup, check if it's a stub type name itself
         # (e.g., ValueError, SentenceTransformer, MagicMock)
         if candidates is None:
@@ -175,21 +191,30 @@ def resolve_library_stubs(graph: Graph) -> int:
                     candidates = [(stub_type, "javascript")]
                 elif stub_type in _CPP_STUBS:
                     candidates = [(stub_type, "cpp")]
-            
+
             if candidates is None:
+                continue
+
+        source_node = graph.node(src)
+        source_dialect = _source_dialect(
+            source_node.source_uri if source_node is not None else None
+        )
+        if source_dialect is not None:
+            candidates = [item for item in candidates if item[1] == source_dialect]
+            if not candidates:
                 continue
 
         # Pick the best candidate using disambiguation hints
         best_type = None
         best_dialect = None
-        
+
         # 1. Check for exact method name match with a stub type
         for type_name, dialect in candidates:
             if type_name == method_name:
                 best_type = type_name
                 best_dialect = dialect
                 break
-        
+
         # 2. Check method-level disambiguation hints
         if best_type is None:
             preferred_type = get_method_disambiguation(method_name)
@@ -199,7 +224,7 @@ def resolve_library_stubs(graph: Graph) -> int:
                         best_type = type_name
                         best_dialect = dialect
                         break
-        
+
         # 3. Fallback: prefer Python, then Rust, then JS, then C++
         if best_type is None:
             dialect_order = ["python", "rust", "javascript", "cpp"]
@@ -211,7 +236,7 @@ def resolve_library_stubs(graph: Graph) -> int:
                         break
                 if best_type is not None:
                     break
-        
+
         # 4. Final fallback: pick first candidate
         if best_type is None and candidates:
             best_type, best_dialect = candidates[0]
@@ -224,11 +249,33 @@ def resolve_library_stubs(graph: Graph) -> int:
                 stub_type_nodes[best_type] = stub_id
 
         if stub_id is not None:
-            # Remove the old unresolved edge and add a stub edge
-            # (We skip the removal here to keep the graph simple;
-            # the old edge stays but the new stub edge provides a resolution.)
-            graph.add_edge(src, stub_id, Edge(kind=edge.kind, confidence=Confidence.inferred(), valid_from=edge.valid_from, valid_to=edge.valid_to))
+            already_resolved = any(
+                target == stub_id and existing.kind == edge.kind
+                for target, existing in graph.out_neighbors(src)
+            )
+            if not already_resolved:
+                resolved_edge = Edge(
+                    kind=edge.kind,
+                    confidence=Confidence.INFERRED,
+                    valid_from=edge.valid_from,
+                    valid_to=edge.valid_to,
+                )
+                resolved_edge.properties["resolved_from"] = "library_stub"
+                graph.add_edge(src, stub_id, resolved_edge)
+            stale_edges.append(eid)
             additions += 1
+
+    if stale_edges:
+        graph.remove_edges_by_id(stale_edges)
+        orphaned = [
+            node_id
+            for node_id, node in graph.nodes()
+            if node.qualified_name.startswith("call::")
+            and not any(graph.in_neighbors(node_id))
+            and not any(graph.out_neighbors(node_id))
+        ]
+        for node_id in orphaned:
+            graph.remove_node(node_id)
 
     return additions
 
@@ -244,28 +291,16 @@ def resolve_library_stubs_batch(graph: Graph) -> dict[str, Any]:
     Returns:
         Statistics dict with total placeholders, resolved, and unresolved.
     """
-    total = 0
-    resolved = 0
-
-    # Count unresolved call placeholders
-    for nid, node in graph.nodes():
-        if node.qualified_name.startswith("call::") and not should_suppress_call_placeholder(node.qualified_name[6:]):
-            total += 1
+    total = _unresolved_call_edges(graph)
 
     # Resolve
     added = resolve_library_stubs(graph)
-    resolved = added
-
-    # Re-count after resolution
-    remaining = 0
-    for nid, node in graph.nodes():
-        if node.qualified_name.startswith("call::") and not should_suppress_call_placeholder(node.qualified_name[6:]):
-            remaining += 1
+    remaining = _unresolved_call_edges(graph)
 
     return {
         "operation": "library_stubs",
         "total_unresolved": total,
-        "resolved": resolved,
+        "resolved": added,
         "unresolved_remaining": remaining,
-        "resolution_rate": round(resolved / max(1, total), 3) if total > 0 else 0.0,
+        "resolution_rate": round(added / total, 3) if total > 0 else 0.0,
     }

@@ -404,10 +404,16 @@ class TestGraphDiff:
         head = Graph()
         h1 = head.add_node(Node.new(NodeKind.FUNCTION, "app::a"))
         h2 = head.add_node(Node.new(NodeKind.FUNCTION, "app::b"))
-        head.add_edge(h1, h2, Edge.extracted(EdgeKind.CALLS))
+        edge_id = head.add_edge(h1, h2, Edge.extracted(EdgeKind.CALLS))
 
         result = graph_diff(base, head)
         assert len(result["added_edges"]) == 1
+        assert result["added_edges"][0] == {
+            "id": edge_id.value,
+            "src": h1.value,
+            "dst": h2.value,
+            "kind": "calls",
+        }
 
     def test_diff_removed_edge(self) -> None:
         from graphician.analysis.diff import graph_diff

@@ -8,6 +8,7 @@ from typing import Any
 from ...core.edge import EdgeKind
 from ...core.graph import Graph
 from ...core.id import NodeId
+from ..native import native_graph
 from .dsl import Motif
 
 
@@ -55,6 +56,32 @@ def find_motifs(graph: Graph, motif: Motif, limit: int = 50) -> list[MotifMatch]
                     continue
             candidates.append(nid)
         candidate_sets.append(candidates)
+
+    snapshot = native_graph(graph)
+    if snapshot is not None:
+        native_matches = snapshot.motif_matches(
+            [[node_id.value for node_id in candidates] for candidates in candidate_sets],
+            [
+                (edge.from_id, edge.to_id, edge.kind.value if edge.kind is not None else None)
+                for edge in motif.edges
+            ],
+            limit,
+        )
+        results: list[MotifMatch] = []
+        for mapping in native_matches:
+            node_map = {index: NodeId(node_id) for index, node_id in enumerate(mapping)}
+            edges_out: list[tuple[str, str, str]] = []
+            for edge in motif.edges:
+                src_node = graph.node(node_map[edge.from_id])
+                dst_node = graph.node(node_map[edge.to_id])
+                if src_node is not None and dst_node is not None:
+                    edges_out.append((
+                        src_node.qualified_name,
+                        edge.kind.value if edge.kind else "any",
+                        dst_node.qualified_name,
+                    ))
+            results.append(MotifMatch(node_map=node_map, edges=edges_out))
+        return results
 
     # Run backtracking search
     results: list[MotifMatch] = []
@@ -119,12 +146,11 @@ def _check_consistency(
             any(t == assigned_pidx for t, _ in pattern_adj.get(pattern_node_idx, []))
             or any(t == pattern_node_idx for t, _ in pattern_adj.get(assigned_pidx, []))
         )
-        if pattern_has_edge:
-            if (
-                (assigned_gid, graph_node_id) not in edge_kinds
-                and (graph_node_id, assigned_gid) not in edge_kinds
-            ):
-                return False
+        if pattern_has_edge and (
+            (assigned_gid, graph_node_id) not in edge_kinds
+            and (graph_node_id, assigned_gid) not in edge_kinds
+        ):
+            return False
     return True
 
 

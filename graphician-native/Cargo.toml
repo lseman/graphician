@@ -1,19 +1,24 @@
 [package]
-name = "graphician-extract"
+name = "graphician-native"
 version = "0.1.0"
 edition = "2021"
-description = "High-performance code extraction using tree-sitter Rust bindings"
+description = "Graphician's native extraction and graph-analysis engine"
 
 [lib]
-name = "graphician_extract"
+name = "graphician_native"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pyo3 = { version = "0.25", features = ["extension-module", "abi3-py311"] }
 tree-sitter = "0.26"
 tree-sitter-python = "0.25"
+tree-sitter-typescript = "0.23"
+tree-sitter-rust = "0.24"
+tree-sitter-cpp = "0.23"
+tree-sitter-java = "0.23"
 serde_json = "1.0"
 rayon = "1.10"
+rand = "0.8"
 
 [dependencies.pyo3-ffi]
 version = "0.25"

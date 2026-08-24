@@ -22,11 +22,9 @@ from graphician.core.node import Node, NodeKind
 from . import HAS_RUST
 
 if HAS_RUST:
-    from . import (
-        extract_python_file as _rust_extract_single,
-        extract_python_files as _rust_extract_parallel,
-        extract_data_flow as _rust_extract_data_flow,
-    )
+    from . import extract_data_flow as _rust_extract_data_flow
+    from . import extract_python_file as _rust_extract_single
+    from . import extract_python_files as _rust_extract_parallel
 
 
 def _add_node(
@@ -96,7 +94,7 @@ def extract_python_file(
     record_path = source_path if source_path is not None else path
 
     # Call the Rust extraction
-    result = _rust_extract(raw, file_path=str(record_path), file_qn=file_qn or "")
+    result = _rust_extract_single(raw, file_path=str(record_path), file_qn=file_qn or "")
 
     # Create file node
     file_name = record_path.stem
@@ -125,14 +123,18 @@ def extract_python_file(
             "module": NodeKind.MODULE,
         }
         kind = kind_map.get(node_data["kind"], NodeKind.FUNCTION)
-        props = _parse_properties(node_data.get("properties", "{}")) if isinstance(node_data.get("properties"), str) else node_data.get("properties", {})
+        props = (
+            _parse_properties(node_data.get("properties", "{}"))
+            if isinstance(node_data.get("properties"), str)
+            else node_data.get("properties", {})
+        )
         _add_node(
             graph,
             kind,
             node_data["qualified_name"],
             record_path,
-            node_data["line_start"],
-            node_data["line_end"],
+            max(0, node_data["line_start"] - 1),
+            max(0, node_data["line_end"] - 1),
             source_text=node_data.get("source_text", ""),
             props=props,
         )
@@ -200,7 +202,12 @@ def extract_python_files(
     if not HAS_RUST or len(paths) < 2:
         # Fallback: use single-file extraction for 0-1 files or no Rust
         for path in paths:
-            extract_python_file(path, graph, file_qn=file_qns.get(path) if file_qns else None, source_path=source_paths.get(path) if source_paths else None)
+            extract_python_file(
+                path,
+                graph,
+                file_qn=file_qns.get(path) if file_qns else None,
+                source_path=source_paths.get(path) if source_paths else None,
+            )
         return
 
     # Prepare data for parallel extraction
@@ -250,8 +257,8 @@ def extract_python_files(
                 kind,
                 node_data["qualified_name"],
                 path,
-                node_data["line_start"],
-                node_data["line_end"],
+                max(0, node_data["line_start"] - 1),
+                max(0, node_data["line_end"] - 1),
                 source_text=node_data.get("source_text", ""),
                 props=props,
             )
@@ -329,22 +336,26 @@ def extract_data_flow(
     result = _rust_extract_data_flow(
         source_text=source_text,
         function_id=function_id.value,
-        params=params if params is not None else [],
+        params=params,
     )
 
     # Create variable nodes and emit DataFlow edges
     count = 0
     for edge_data in result.get("edges", []):
         flow_type = edge_data.get("flow_type", "")
+        source_kind = edge_data.get("source_kind", "")
         source_name = edge_data.get("source_name", "")
         target_name = edge_data.get("target_name", "")
         source_text_line = edge_data.get("source_text", "")
 
         # Determine source and target QNs
         if flow_type in ("param_flow", "return_flow"):
-            # For param/return flow, create param or return nodes
-            source_id = _ensure_param_node(
-                graph, function_id, source_name, source_text_line
+            # Return edges may originate directly from the function when the
+            # returned expression is not one of its parameters.
+            source_id = (
+                function_id
+                if source_kind == "function"
+                else _ensure_param_node(graph, function_id, source_name, source_text_line)
             )
             if flow_type == "return_flow":
                 target_id = _ensure_return_node(graph, function_id, source_text_line)
@@ -361,10 +372,16 @@ def extract_data_flow(
         else:
             continue
 
-        if source_id is not None and target_id is not None:
-            if not graph.has_edge_kind(source_id, target_id, EdgeKind.DATA_FLOW):
-                graph.add_edge(source_id, target_id, Edge.extracted(EdgeKind.DATA_FLOW))
-                count += 1
+        if (
+            source_id is not None
+            and target_id is not None
+            and not any(
+                neighbor == target_id and edge.kind == EdgeKind.DATA_FLOW
+                for neighbor, edge in graph.out_neighbors(source_id)
+            )
+        ):
+            graph.add_edge(source_id, target_id, Edge.extracted(EdgeKind.DATA_FLOW))
+            count += 1
 
     return count
 

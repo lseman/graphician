@@ -29,7 +29,6 @@ from ..core.id import NodeId
 from ..core.node import Node, NodeKind
 from .adjacency import AdjacencyConfig, build_adjacency_matrix
 
-
 # ── Edge kind weights ────────────────────────────────────────────────
 
 def _edge_weight(kind: EdgeKind) -> float:
@@ -97,6 +96,14 @@ def _weighted_pagerank(
     iterations: int,
     personalization: dict[NodeId, float],
 ) -> dict[NodeId, float]:
+    from .native import native_graph
+
+    snapshot = native_graph(graph)
+    if snapshot is not None:
+        seeds = [(nid.value, weight) for nid, weight in personalization.items()]
+        ranks = snapshot.pagerank(damping, iterations, seeds or None)
+        return {NodeId(node_id): float(rank) for node_id, rank in ranks.items()}
+
     nodes = [nid for nid, _ in graph.nodes()]
     n = len(nodes)
     if n == 0:
@@ -194,15 +201,12 @@ def _weighted_pagerank(
                 )
 
         for idx in range(n):
-            if has_personalization:
-                p = personalization.get(nodes[idx], 0.0)
-            else:
-                p = 1.0 / n
+            p = personalization.get(nodes[idx], 0.0) if has_personalization else 1.0 / n
             next_ranks[idx] += damping * dangling_mass * p
 
         ranks = next_ranks
 
-    return dict(zip(nodes, ranks))
+    return dict(zip(nodes, ranks, strict=True))
 
 
 # ── Weighted transitions ─────────────────────────────────────────────
@@ -239,6 +243,4 @@ def is_rank_noise(node: Node) -> bool:
     """
     if node.kind in (NodeKind.FILE, NodeKind.FLOW):
         return True
-    if node.qualified_name.startswith("call::"):
-        return True
-    return False
+    return node.qualified_name.startswith("call::")

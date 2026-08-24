@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..._extract import dedup_candidate_pairs as _native_candidate_pairs
 from ...core.id import NodeId
 from ...core.node import Node
 from .minhash import MinHash, shingle
@@ -58,11 +59,22 @@ def lsh_candidate_pairs(
     Returns list of (node_id_a, node_id_b, jaccard_estimate) for pairs
     sharing at least one LSH band with Jaccard >= threshold.
     """
+    if _native_candidate_pairs is not None:
+        native_pairs = _native_candidate_pairs(
+            [(node_id.value, node.name) for node, node_id in zip(nodes, node_ids, strict=True)],
+            options.shingle_size,
+            options.num_permutations,
+            options.num_bands,
+            options.row_length,
+            options.jaccard_threshold,
+        )
+        return [(NodeId(left), NodeId(right), score) for left, right, score in native_pairs]
+
     lsh = LshIndex(options.num_bands, options.row_length)
 
     # Build MinHash signatures
     signatures: dict[NodeId, MinHash] = {}
-    for node, nid in zip(nodes, node_ids):
+    for node, nid in zip(nodes, node_ids, strict=True):
         shingles = shingle(node.name, options.shingle_size)
         signatures[nid] = MinHash.from_iter(shingles, options.num_permutations)
 

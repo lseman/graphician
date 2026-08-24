@@ -104,6 +104,12 @@ def infomap_with_options(
 
     Mirrors Rust ``infomap_with_options`` (infomap.rs:10-29).
     """
+    from .native import detect_native
+
+    native = detect_native(graph, options, "infomap")
+    if native is not None:
+        return native
+
     working = WorkingGraph.from_graph(graph)
     if working.total_weight <= 0.0:
         nodes = list(working.original_nodes())

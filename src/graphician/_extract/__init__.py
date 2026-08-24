@@ -10,16 +10,24 @@ Usage:
 
 from __future__ import annotations
 
-import sys
+from importlib.machinery import EXTENSION_SUFFIXES
 from pathlib import Path
-from typing import Any
 
 # Try to load the compiled Rust extension
-_lib_path = Path(__file__).parent / "graphician_extract.cpython-314-x86_64-linux-gnu.so"
+_module_dir = Path(__file__).parent
+_lib_path = next(
+    (
+        _module_dir / f"graphician_native{suffix}"
+        for suffix in EXTENSION_SUFFIXES
+        if (_module_dir / f"graphician_native{suffix}").exists()
+    ),
+    None,
+)
 
-if _lib_path.exists():
+if _lib_path is not None:
     import importlib.util
-    _spec = importlib.util.spec_from_file_location("graphician_extract", _lib_path)
+
+    _spec = importlib.util.spec_from_file_location("graphician_native", _lib_path)
     _mod = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
     extract_python_file = _mod.extract_python_file
@@ -27,13 +35,62 @@ if _lib_path.exists():
     extract_data_flow = _mod.extract_data_flow
     available = _mod.available
     version = _mod.version
+    # Language-specific extractors
+    extract_rust_file = _mod.extract_rust_file
+    extract_typescript_file = _mod.extract_typescript_file
+    extract_javascript_file = _mod.extract_javascript_file
+    extract_java_file = _mod.extract_java_file
+    extract_cpp_file = _mod.extract_cpp_file
+    CommunityOptions = _mod.CommunityOptions
+    community_detection_louvain = _mod.community_detection_louvain
+    community_detection_leiden = _mod.community_detection_leiden
+    community_detection_infomap = _mod.community_detection_infomap
+    dedup_candidate_pairs = _mod.dedup_candidate_pairs
+    fuzzy_score_matrix = _mod.fuzzy_score_matrix
+    NativeGraph = _mod.NativeGraph
     HAS_RUST = True
 else:
     HAS_RUST = False
     extract_python_file = None
     extract_python_files = None
     extract_data_flow = None
-    available = lambda: False
-    version = lambda: "0.0.0"
+    extract_rust_file = None
+    extract_typescript_file = None
+    extract_javascript_file = None
+    extract_java_file = None
+    extract_cpp_file = None
+    CommunityOptions = None
+    community_detection_louvain = None
+    community_detection_leiden = None
+    community_detection_infomap = None
+    dedup_candidate_pairs = None
+    fuzzy_score_matrix = None
+    NativeGraph = None
 
-__all__ = ["extract_python_file", "extract_python_files", "extract_data_flow", "available", "version", "HAS_RUST"]
+    def available() -> bool:
+        return False
+
+    def version() -> str:
+        return "0.0.0"
+
+
+__all__ = [
+    "extract_python_file",
+    "extract_python_files",
+    "extract_data_flow",
+    "extract_rust_file",
+    "extract_typescript_file",
+    "extract_javascript_file",
+    "extract_java_file",
+    "extract_cpp_file",
+    "CommunityOptions",
+    "community_detection_louvain",
+    "community_detection_leiden",
+    "community_detection_infomap",
+    "dedup_candidate_pairs",
+    "fuzzy_score_matrix",
+    "NativeGraph",
+    "available",
+    "version",
+    "HAS_RUST",
+]

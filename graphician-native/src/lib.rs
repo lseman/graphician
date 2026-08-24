@@ -1,4 +1,6 @@
 //! High-performance Python code extraction using tree-sitter Rust bindings.
+pub mod analysis;
+pub mod graph;
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -7,7 +9,7 @@ use serde_json::json;
 use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
 
 /// Safe text extraction from a tree-sitter node via byte-slicing.
-fn node_text<'a>(node: &Node<'a>, source: &'a [u8]) -> &'a [u8] {
+pub fn node_text<'a>(node: &Node<'a>, source: &'a [u8]) -> &'a [u8] {
     if node.byte_range().is_empty() {
         &[]
     } else {
@@ -15,11 +17,11 @@ fn node_text<'a>(node: &Node<'a>, source: &'a [u8]) -> &'a [u8] {
     }
 }
 
-fn node_text_str<'a>(node: &Node<'a>, source: &'a [u8]) -> String {
+pub fn node_text_str<'a>(node: &Node<'a>, source: &'a [u8]) -> String {
     String::from_utf8_lossy(node_text(node, source)).into_owned()
 }
 
-fn extract_name(node: &Node, source: &[u8]) -> Option<String> {
+pub fn extract_name(node: &Node, source: &[u8]) -> Option<String> {
     let text = node_text(node, source);
     if text.is_empty() {
         return None;
@@ -32,7 +34,7 @@ fn extract_name(node: &Node, source: &[u8]) -> Option<String> {
     }
 }
 
-fn child_by_field<'a>(node: &'a Node<'a>, field: &str) -> Option<Node<'a>> {
+pub fn child_by_field<'a>(node: &'a Node<'a>, field: &str) -> Option<Node<'a>> {
     node.child_by_field_name(field)
 }
 
@@ -113,7 +115,10 @@ fn is_typevar_definition(body: Option<&Node>, source: &[u8]) -> bool {
                 if expr.kind() == "call" {
                     if let Some(func) = child_by_field(&expr, "function") {
                         let name = node_text_str(&func, source);
-                        if matches!(name.as_str(), "TypeVar" | "ParamSpec" | "TypeVarTuple" | "GenericAlias") {
+                        if matches!(
+                            name.as_str(),
+                            "TypeVar" | "ParamSpec" | "TypeVarTuple" | "GenericAlias"
+                        ) {
                             return true;
                         }
                     }
@@ -126,7 +131,7 @@ fn is_typevar_definition(body: Option<&Node>, source: &[u8]) -> bool {
 
 /// Extract decorator text from a decorator node.
 /// Handles simple identifiers (@dataclass) and attributes (pytest.fixture).
-fn extract_decorator_name(dec: &Node, source: &[u8]) -> String {
+pub fn extract_decorator_name(dec: &Node, source: &[u8]) -> String {
     for c in dec.children(&mut dec.walk()) {
         if c.kind() == "@" {
             continue;
@@ -136,7 +141,8 @@ fn extract_decorator_name(dec: &Node, source: &[u8]) -> String {
             "identifier" => return node_text_str(&c, source).trim().to_string(),
             "attribute" => {
                 // Build dotted name: object.attribute
-                let parts: Vec<String> = c.children(&mut c.walk())
+                let parts: Vec<String> = c
+                    .children(&mut c.walk())
                     .filter(|ch| ch.kind() != "." && ch.kind() != "@")
                     .map(|ch| node_text_str(&ch, source))
                     .collect();
@@ -150,7 +156,8 @@ fn extract_decorator_name(dec: &Node, source: &[u8]) -> String {
                     match func.kind() {
                         "identifier" => return node_text_str(&func, source).trim().to_string(),
                         "attribute" => {
-                            let parts: Vec<String> = func.children(&mut func.walk())
+                            let parts: Vec<String> = func
+                                .children(&mut func.walk())
                                 .filter(|ch| ch.kind() != "." && ch.kind() != "@")
                                 .map(|ch| node_text_str(&ch, source))
                                 .collect();
@@ -168,7 +175,7 @@ fn extract_decorator_name(dec: &Node, source: &[u8]) -> String {
     String::new()
 }
 
-fn extract_decorators(node: &Node, source: &[u8]) -> Vec<String> {
+pub fn extract_decorators(node: &Node, source: &[u8]) -> Vec<String> {
     let mut decorators = Vec::new();
     for child in node.children(&mut node.walk()) {
         // Handle both decorated_definition and decorated node types
@@ -193,7 +200,7 @@ fn extract_decorators(node: &Node, source: &[u8]) -> Vec<String> {
 }
 
 #[derive(Debug, Clone)]
-struct ExtractedNode {
+pub struct ExtractedNode {
     kind: String,
     qualified_name: String,
     name: String,
@@ -205,7 +212,7 @@ struct ExtractedNode {
 }
 
 #[derive(Debug, Clone)]
-struct ExtractedEdge {
+pub struct ExtractedEdge {
     src_qn: String,
     dst_qn: String,
     kind: String,
@@ -215,14 +222,14 @@ struct ExtractedEdge {
 }
 
 #[derive(Debug, Clone)]
-struct CallPlaceholder {
+pub struct CallPlaceholder {
     caller_qn: String,
     callee_qn: String,
     receiver: Option<String>,
 }
 
 #[derive(Debug)]
-struct ExtractionResult {
+pub struct ExtractionResult {
     nodes: Vec<ExtractedNode>,
     edges: Vec<ExtractedEdge>,
     calls: Vec<CallPlaceholder>,
@@ -270,15 +277,11 @@ pub fn is_test_file_path(path: &str) -> bool {
 
     // Extension-gated suffix conventions
     match ext {
-        "java" | "cs" | "php" => {
-            stem.ends_with("Test") || stem.ends_with("Tests")
-        }
+        "java" | "cs" | "php" => stem.ends_with("Test") || stem.ends_with("Tests"),
         "kt" | "swift" => {
             stem.ends_with("Test") || stem.ends_with("Tests") || stem.ends_with("Spec")
         }
-        "scala" => {
-            stem.ends_with("Spec") || stem.ends_with("Suite") || stem.ends_with("Test")
-        }
+        "scala" => stem.ends_with("Spec") || stem.ends_with("Suite") || stem.ends_with("Test"),
         "dart" => stem_lower.starts_with("test_") || stem_lower.ends_with("_test"),
         "lua" => {
             stem_lower.starts_with("test_")
@@ -324,7 +327,7 @@ pub fn is_test_name(name: &str) -> bool {
     false
 }
 
-fn should_suppress_call_placeholder(name: &str) -> bool {
+pub fn should_suppress_call_placeholder(name: &str) -> bool {
     let name = name.trim();
     if name.is_empty() {
         return true;
@@ -444,14 +447,49 @@ pub fn is_generic_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     matches!(
         lower.as_str(),
-        "get" | "find" | "insert" | "remove" | "push" | "pop"
-            | "select" | "execute" | "merge" | "load" | "write" | "read"
-            | "path" | "add" | "string" | "new" | "index" | "join"
-            | "take" | "has" | "display" | "now" | "entry" | "default"
-            | "count" | "first" | "last" | "position" | "split"
-            | "replace" | "clear" | "values" | "node" | "text" | "parse"
-            | "kind" | "parent" | "language" | "status" | "watch"
-            | "commit" | "block" | "attr"
+        "get"
+            | "find"
+            | "insert"
+            | "remove"
+            | "push"
+            | "pop"
+            | "select"
+            | "execute"
+            | "merge"
+            | "load"
+            | "write"
+            | "read"
+            | "path"
+            | "add"
+            | "string"
+            | "new"
+            | "index"
+            | "join"
+            | "take"
+            | "has"
+            | "display"
+            | "now"
+            | "entry"
+            | "default"
+            | "count"
+            | "first"
+            | "last"
+            | "position"
+            | "split"
+            | "replace"
+            | "clear"
+            | "values"
+            | "node"
+            | "text"
+            | "parse"
+            | "kind"
+            | "parent"
+            | "language"
+            | "status"
+            | "watch"
+            | "commit"
+            | "block"
+            | "attr"
     )
 }
 
@@ -485,12 +523,7 @@ pub fn truncated_source_text(source: &str, line_start: usize, line_end: usize) -
 
 /// Extract imports using a tree-sitter Query — faster and more robust
 /// than manual child iteration.
-fn emit_imports(
-    root: &Node,
-    source: &[u8],
-    file_qn: &str,
-    result: &mut ExtractionResult,
-) {
+fn emit_imports(root: &Node, source: &[u8], file_qn: &str, result: &mut ExtractionResult) {
     let query = Query::new(
         &tree_sitter_python::LANGUAGE.into(),
         r#"
@@ -611,14 +644,56 @@ fn walk_scope(
                 // Find the actual definition (class/function) inside decorated_definition
                 for def in child.children(&mut child.walk()) {
                     match def.kind() {
-                        "class_definition" => handle_class(&def, file_qn, path, parent_qn, scope, file_is_test, source, result, Some(&decorators)),
-                        "function_definition" => handle_function(&def, file_qn, path, parent_qn, scope, parent_is_class, file_is_test, source, result, Some(&decorators)),
+                        "class_definition" => handle_class(
+                            &def,
+                            file_qn,
+                            path,
+                            parent_qn,
+                            scope,
+                            file_is_test,
+                            source,
+                            result,
+                            Some(&decorators),
+                        ),
+                        "function_definition" => handle_function(
+                            &def,
+                            file_qn,
+                            path,
+                            parent_qn,
+                            scope,
+                            parent_is_class,
+                            file_is_test,
+                            source,
+                            result,
+                            Some(&decorators),
+                        ),
                         _ => {}
                     }
                 }
             }
-            "class_definition" => handle_class(&child, file_qn, path, parent_qn, scope, file_is_test, source, result, None),
-            "function_definition" => handle_function(&child, file_qn, path, parent_qn, scope, parent_is_class, file_is_test, source, result, None),
+            "class_definition" => handle_class(
+                &child,
+                file_qn,
+                path,
+                parent_qn,
+                scope,
+                file_is_test,
+                source,
+                result,
+                None,
+            ),
+            "function_definition" => handle_function(
+                &child,
+                file_qn,
+                path,
+                parent_qn,
+                scope,
+                parent_is_class,
+                file_is_test,
+                source,
+                result,
+                None,
+            ),
             _ => {}
         }
     }
@@ -697,8 +772,13 @@ fn handle_class(
     if let Some(bases) = bases_node {
         for base in bases.children(&mut bases.walk()) {
             let base_name = match base.kind() {
-                "identifier" | "dotted_name" => node_text_str(&base, source).split('.').last().map(|s| s.to_string()),
-                "attribute" => child_by_field(&base, "attribute").map(|a| node_text_str(&a, source)),
+                "identifier" | "dotted_name" => node_text_str(&base, source)
+                    .split('.')
+                    .last()
+                    .map(|s| s.to_string()),
+                "attribute" => {
+                    child_by_field(&base, "attribute").map(|a| node_text_str(&a, source))
+                }
                 _ => None,
             };
             if let Some(bn) = base_name {
@@ -711,7 +791,10 @@ fn handle_class(
                     line_start: 0,
                     line_end: 0,
                     source_text: None,
-                    properties: vec![("dialect".to_string(), "python".to_string()), ("role".to_string(), "base_class".to_string())],
+                    properties: vec![
+                        ("dialect".to_string(), "python".to_string()),
+                        ("role".to_string(), "base_class".to_string()),
+                    ],
                 });
                 result.edges.push(ExtractedEdge {
                     src_qn: qn.clone(),
@@ -725,7 +808,17 @@ fn handle_class(
         }
     }
     if let Some(body) = body {
-        walk_scope(&body, file_qn, path, &qn, &child_scope, true, file_is_test, source, result);
+        walk_scope(
+            &body,
+            file_qn,
+            path,
+            &qn,
+            &child_scope,
+            true,
+            file_is_test,
+            source,
+            result,
+        );
     }
 }
 
@@ -793,12 +886,32 @@ fn handle_function(
         properties: vec![],
     });
     if let Some(body) = body {
-        emit_calls(&body, source, &qn, result, &["function_definition", "class_definition"]);
-        walk_scope(&body, file_qn, path, &qn, &child_scope, false, file_is_test, source, result);
+        emit_calls(
+            &body,
+            source,
+            &qn,
+            result,
+            &["function_definition", "class_definition"],
+        );
+        walk_scope(
+            &body,
+            file_qn,
+            path,
+            &qn,
+            &child_scope,
+            false,
+            file_is_test,
+            source,
+            result,
+        );
     }
 }
 
-fn extract_python(source: &[u8], file_path: &str, file_qn: &str) -> Result<ExtractionResult, PyErr> {
+fn extract_python(
+    source: &[u8],
+    file_path: &str,
+    file_qn: &str,
+) -> Result<ExtractionResult, PyErr> {
     let mut parser = tree_sitter::Parser::new();
     let lang = tree_sitter_python::LANGUAGE.into();
     parser.set_language(&lang).map_err(|e| {
@@ -833,8 +946,19 @@ fn extract_python(source: &[u8], file_path: &str, file_qn: &str) -> Result<Extra
         properties: vec![("dialect".to_string(), "python".to_string())],
     });
     emit_imports(&root, source, &file_qn_full, &mut result);
-    let file_is_test = is_test_file_path(file_path) || is_test_file_path(&format!("/{}", file_path));
-    walk_scope(&root, &file_qn_full, file_path, &file_qn_full, &[], false, file_is_test, source, &mut result);
+    let file_is_test =
+        is_test_file_path(file_path) || is_test_file_path(&format!("/{}", file_path));
+    walk_scope(
+        &root,
+        &file_qn_full,
+        file_path,
+        &file_qn_full,
+        &[],
+        false,
+        file_is_test,
+        source,
+        &mut result,
+    );
     Ok(result)
 }
 
@@ -1022,6 +1146,9 @@ fn extract_python_files(py: Python, files: &Bound<'_, PyList>) -> PyResult<PyObj
     })
 }
 
+pub mod extractors;
+use extractors::{cpp, java, javascript, rust, typescript};
+
 // ============================================================================
 // Data Flow Edge Extraction
 // ============================================================================
@@ -1057,7 +1184,10 @@ fn extract_data_flow(
     let params_list: Vec<String> = match params {
         Some(pl) => {
             let list = pl.downcast::<PyList>().map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!("params must be a list: {}", e))
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(
+                    "params must be a list: {}",
+                    e
+                ))
             })?;
             list.iter()
                 .map(|p| p.extract::<String>().unwrap_or_default())
@@ -1334,8 +1464,14 @@ fn extract_rust_params(line: &str) -> Option<Vec<String>> {
         if arg.is_empty() || arg == "self" || arg == "&self" || arg == "&mut self" {
             continue;
         }
-        let name = arg.split([':', '=']).next().unwrap_or(arg).trim().to_string();
-        let name = name.strip_prefix("&mut ")
+        let name = arg
+            .split([':', '='])
+            .next()
+            .unwrap_or(arg)
+            .trim()
+            .to_string();
+        let name = name
+            .strip_prefix("&mut ")
             .or_else(|| name.strip_prefix("&"))
             .unwrap_or(&name)
             .trim()
@@ -1363,7 +1499,12 @@ fn extract_python_params(line: &str) -> Option<Vec<String>> {
         if arg.is_empty() || arg == "self" || arg == "cls" {
             continue;
         }
-        let name = arg.split([':', '=']).next().unwrap_or(arg).trim().to_string();
+        let name = arg
+            .split([':', '='])
+            .next()
+            .unwrap_or(arg)
+            .trim()
+            .to_string();
         let name = name.trim().to_string();
         if !name.is_empty() && !name.starts_with('_') {
             params.push(name);
@@ -1388,8 +1529,14 @@ fn extract_ts_params(line: &str) -> Option<Vec<String>> {
         if arg.is_empty() {
             continue;
         }
-        let name = arg.split([':', '=']).next().unwrap_or(arg).trim().to_string();
-        let name = name.strip_prefix("public ")
+        let name = arg
+            .split([':', '='])
+            .next()
+            .unwrap_or(arg)
+            .trim()
+            .to_string();
+        let name = name
+            .strip_prefix("public ")
             .or_else(|| name.strip_prefix("private "))
             .or_else(|| name.strip_prefix("protected "))
             .unwrap_or(&name)
@@ -1409,14 +1556,35 @@ fn extract_ts_params(line: &str) -> Option<Vec<String>> {
     }
 }
 
+// Community detection — re-exported from analysis::core
+pub use analysis::core::{
+    community_detection_infomap, community_detection_leiden, community_detection_louvain,
+    CommunityOptions,
+};
+
 #[pymodule]
-fn graphician_extract(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn graphician_native(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(extract_python_file, m)?)?;
     m.add_function(wrap_pyfunction!(extract_python_files, m)?)?;
     m.add_function(wrap_pyfunction!(extract_data_flow, m)?)?;
+    m.add_function(wrap_pyfunction!(rust::extract_rust_file, m)?)?;
+    m.add_function(wrap_pyfunction!(typescript::extract_typescript_file, m)?)?;
+    m.add_function(wrap_pyfunction!(javascript::extract_javascript_file, m)?)?;
+    m.add_function(wrap_pyfunction!(java::extract_java_file, m)?)?;
+    m.add_function(wrap_pyfunction!(cpp::extract_cpp_file, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add_function(wrap_pyfunction!(available, m)?)?;
-    m.add("__doc__", "High-performance Python code extraction using tree-sitter Rust bindings")?;
+    m.add_function(wrap_pyfunction!(community_detection_louvain, m)?)?;
+    m.add_function(wrap_pyfunction!(community_detection_leiden, m)?)?;
+    m.add_function(wrap_pyfunction!(community_detection_infomap, m)?)?;
+    m.add_function(wrap_pyfunction!(analysis::dedup::dedup_candidate_pairs, m)?)?;
+    m.add_function(wrap_pyfunction!(analysis::search::fuzzy_score_matrix, m)?)?;
+    m.add_class::<CommunityOptions>()?;
+    m.add_class::<graph::NativeGraph>()?;
+    m.add(
+        "__doc__",
+        "High-performance multi-language code extraction using tree-sitter Rust bindings",
+    )?;
     Ok(())
 }
 
@@ -1443,7 +1611,11 @@ mod tests {
     fn test_imports() {
         let source = b"import os\nfrom typing import List\n";
         let result = extract_python(source, "test.py", "file::test").unwrap();
-        let imports: Vec<_> = result.edges.iter().filter(|e| e.kind == "imports").collect();
+        let imports: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|e| e.kind == "imports")
+            .collect();
         assert!(!imports.is_empty());
     }
 

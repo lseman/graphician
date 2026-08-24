@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any
+
+from ..native import native_graph
 
 LOW_COHESION_THRESHOLD = 0.15
 
@@ -35,6 +36,11 @@ def community_cohesion(
     A community with n nodes has n*(n-1)/2 possible directed edges.
     Returns {community_id: cohesion_score}.
     """
+    snapshot = native_graph(graph)
+    if snapshot is not None:
+        metrics = snapshot.community_quality_metrics(list(communities.items()))
+        return metrics[0]
+
     # Count internal edges per community
     internal: dict[int, set[tuple[int, int]]] = defaultdict(set)
     for _, src, dst, _ in graph.edges():
@@ -78,6 +84,23 @@ def community_quality(
     Returns:
         CommunityQuality with aggregate metrics.
     """
+    snapshot = native_graph(graph)
+    if snapshot is not None:
+        metrics = snapshot.community_quality_metrics(list(communities.items()), resolution)
+        return CommunityQuality(
+            community_count=metrics[1],
+            singleton_count=metrics[2],
+            min_size=metrics[3],
+            max_size=metrics[4],
+            mean_size=round(metrics[5], 2),
+            score=round(metrics[6], 4),
+            disconnected_communities=0,
+            mean_conductance=round(metrics[7], 4),
+            max_conductance=round(metrics[8], 4),
+            mean_cohesion=round(metrics[9], 4),
+            low_cohesion_communities=metrics[10],
+        )
+
     cohesion = community_cohesion(graph, communities)
 
     # Count sizes

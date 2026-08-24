@@ -206,7 +206,9 @@ _RE_LET_CTOR = re.compile(r"let\s+(?:mut\s+)?(\w+)\s*=\s*([A-Z]\w+)::")
 _RE_LET_STRUCT = re.compile(r"let\s+(?:mut\s+)?(\w+)\s*=\s*([A-Z]\w+)\s*\{")
 # Python-style: var = ClassName(...) or var = ClassName(...)
 _RE_PY_VAR_ANNOT = re.compile(r"(\w+)\s*:\s*([A-Z]\w+)\s*=")
-_RE_PY_VAR_ASSIGN = re.compile(r"(\w+)\s*=\s*([A-Z]\w+)\s*[\(\{]")
+_RE_PY_VAR_ASSIGN = re.compile(
+    r"(\w+)\s*=\s*([A-Z]\w+)(?:\.\w+)*\s*[\(\{]"
+)
 _RE_IMPL_HEADER = re.compile(r"\bimpl(?:\s*<[^{}>]*>)?\s+([^{}]+?)\s*\{")
 
 _NAME_TYPE_MAP: dict[str, str] = {
@@ -324,6 +326,12 @@ def _infer_type_from_var_name(name: str) -> str | None:
     return _NAME_TYPE_MAP.get(name.lower().strip())
 
 
+def _infer_type_from_receiver_expression(expression: str) -> str | None:
+    """Recognize fluent receivers such as ``Node.new(...).with_source(...)``."""
+    match = re.match(r"\s*([A-Z]\w+)(?:\.\w+)*\s*\(", expression)
+    return match.group(1) if match is not None else None
+
+
 def _build_import_tokens(graph: Graph) -> dict[str, set[str]]:
     """Map caller file URI → set of import-path tokens (lowercased)."""
     tokens: dict[str, set[str]] = {}
@@ -397,6 +405,10 @@ def resolve_call_placeholders(graph: Graph) -> int:
             continue
         bare = name[6:]
         if should_suppress_call_placeholder(bare):
+            # Suppressed calls represent language/runtime noise rather than
+            # unresolved project relationships. Remove their placeholder edge
+            # so coverage and traversal do not treat them as graph dead ends.
+            stale_edges.append(edge_id)
             continue
 
         candidates = by_name.get(bare)
@@ -468,7 +480,8 @@ def resolve_call_placeholders(graph: Graph) -> int:
             else:
                 source = (src_node.source_text if src_node else "") or ""
                 impl_type = (
-                    _infer_type_from_annotations(source, receiver_name)
+                    _infer_type_from_receiver_expression(receiver_name)
+                    or _infer_type_from_annotations(source, receiver_name)
                     or _infer_type_from_let_bindings(source, receiver_name)
                     or _infer_type_from_var_name(receiver_name)
                 )

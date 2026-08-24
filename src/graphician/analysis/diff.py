@@ -121,45 +121,45 @@ def graph_diff(base: Any, head: Any) -> dict[str, Any]:
             ))
 
     # Build edge keys by (src_qname, dst_qname, kind)
-    base_edge_keys: dict[tuple[str, str, str], list[int]] = {}
-    head_edge_keys: dict[tuple[str, str, str], list[int]] = {}
+    base_edge_keys: dict[tuple[str, str, str], list[tuple[int, int, int]]] = {}
+    head_edge_keys: dict[tuple[str, str, str], list[tuple[int, int, int]]] = {}
 
-    for _, src, dst, edge in head.edges():
+    for edge_id, src, dst, edge in head.edges():
         src_node = head.node(src)
         dst_node = head.node(dst)
         src_qn = src_node.qualified_name if src_node else ""
         dst_qn = dst_node.qualified_name if dst_node else ""
         key = (src_qn, dst_qn, edge.kind.value)
-        head_edge_keys.setdefault(key, []).append(src.value)
+        head_edge_keys.setdefault(key, []).append((edge_id.value, src.value, dst.value))
 
-    for _, src, dst, edge in base.edges():
+    for edge_id, src, dst, edge in base.edges():
         src_node = base.node(src)
         dst_node = base.node(dst)
         src_qn = src_node.qualified_name if src_node else ""
         dst_qn = dst_node.qualified_name if dst_node else ""
         key = (src_qn, dst_qn, edge.kind.value)
-        base_edge_keys.setdefault(key, []).append(src.value)
+        base_edge_keys.setdefault(key, []).append((edge_id.value, src.value, dst.value))
 
     base_key_set = set(base_edge_keys.keys())
     head_key_set = set(head_edge_keys.keys())
 
     # Added edges: in head but not in base
     for key in head_key_set - base_key_set:
-        for src_id in head_edge_keys[key]:
+        for edge_id, src_id, dst_id in head_edge_keys[key]:
             diff.added_edges.append(DiffEdge(
-                id=src_id,
+                id=edge_id,
                 src=src_id,
-                dst=src_id,
+                dst=dst_id,
                 kind=key[2],
             ))
 
     # Removed edges: in base but not in head
     for key in base_key_set - head_key_set:
-        for src_id in base_edge_keys[key]:
+        for edge_id, src_id, dst_id in base_edge_keys[key]:
             diff.removed_edges.append(DiffEdge(
-                id=src_id,
+                id=edge_id,
                 src=src_id,
-                dst=src_id,
+                dst=dst_id,
                 kind=key[2],
             ))
 

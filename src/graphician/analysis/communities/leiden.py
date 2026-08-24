@@ -64,6 +64,12 @@ def leiden_with_options(
 
     Mirrors Rust ``leiden_with_options`` (leiden.rs:9-20).
     """
+    from .native import detect_native
+
+    native = detect_native(graph, options, "leiden")
+    if native is not None:
+        return native
+
     working = WorkingGraph.from_graph(graph)
     if working.total_weight <= 0.0:
         nodes = list(working.original_nodes())

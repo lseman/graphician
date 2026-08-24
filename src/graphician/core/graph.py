@@ -10,7 +10,7 @@ Lightweight directed graph with:
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Iterator
+from collections.abc import Iterator
 
 from .edge import Edge, EdgeKind
 from .id import EdgeId, NodeId
@@ -238,10 +238,19 @@ class Graph:
         import copy
         new = Graph()
         new._nodes = {idx: copy.deepcopy(node) for idx, node in self._nodes.items()}
-        new._edges = {eid: (src, dst, copy.deepcopy(edge)) for eid, (src, dst, edge) in self._edges.items()}
+        new._edges = {
+            eid: (src, dst, copy.deepcopy(edge))
+            for eid, (src, dst, edge) in self._edges.items()
+        }
         new._by_qname = dict(self._by_qname)
-        new._out = {src: list(neighbors) for src, neighbors in self._out.items()}
-        new._in = {dst: list(neighbors) for dst, neighbors in self._in.items()}
+        new._out = defaultdict(
+            list,
+            {src: list(neighbors) for src, neighbors in self._out.items()},
+        )
+        new._in = defaultdict(
+            list,
+            {dst: list(neighbors) for dst, neighbors in self._in.items()},
+        )
         new._next_node_id = self._next_node_id
         new._next_edge_id = self._next_edge_id
         return new

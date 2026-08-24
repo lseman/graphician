@@ -55,10 +55,15 @@ def test_risk_and_test_coverage_use_tested_by_source_semantics() -> None:
     risks = compute_risk(graph)["risk_scores"]
     secure_risk = next(item for item in risks if item["qualified_name"] == "auth::password_token_admin")
     helper_risk = next(item for item in risks if item["qualified_name"] == "app::helper")
-    assert secure_risk["test"] == 0
-    assert secure_risk["security"] > 0.3
-    assert "high_connectivity" in secure_risk["reasons"]
-    assert helper_risk["reasons"] == ["no_test_coverage"]
+    # New CRG-style model: secure has 1 test → test_coverage=0.25 (low)
+    # Has 4 security keywords matched → security_sensitivity=0.20
+    # Has 12 callers → caller_count=0.10
+    assert secure_risk["test"] == 0  # backward-compat: 0 = has test coverage
+    assert secure_risk["security"] > 0.0  # security keywords matched
+    assert "security_sensitive" in secure_risk["reasons"]
+    assert "many_callers" in secure_risk["reasons"]
+    # helper has no tests, no callers → only test_coverage factor
+    assert "low_test_coverage" in helper_risk["reasons"]
 
 
 def test_empty_change_analysis_contracts() -> None:

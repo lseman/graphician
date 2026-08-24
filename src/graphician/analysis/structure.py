@@ -69,6 +69,15 @@ def cyclic_components(graph: Graph) -> list[Component]:
     self-loops. This is the structural-analysis version of find_cycles;
     it returns typed Component objects rather than dicts.
     """
+    from .native import native_graph
+
+    snapshot = native_graph(graph)
+    if snapshot is not None:
+        return [
+            Component(nodes=[NodeId(node_id) for node_id in component])
+            for component in snapshot.cyclic_components()
+        ]
+
     # Tarjan's SCC
     index_counter = [0]
     stack: list[NodeId] = []
@@ -127,6 +136,15 @@ def core_numbers(graph: Graph) -> dict[NodeId, int]:
 
     Returns a mapping from NodeId to its k-core number.
     """
+    from .native import native_graph
+
+    snapshot = native_graph(graph)
+    if snapshot is not None:
+        return {
+            NodeId(node_id): int(core)
+            for node_id, core in snapshot.core_numbers().items()
+        }
+
     # Build undirected adjacency as CSR
     # First, collect all unique edges (undirected)
     edge_set: set[tuple[int, int]] = set()
@@ -332,6 +350,12 @@ def _articulation_points(graph: Graph) -> list[int]:
     
     Uses numba-accelerated iterative algorithm when available.
     """
+    from .native import native_graph
+
+    snapshot = native_graph(graph)
+    if snapshot is not None:
+        return list(snapshot.articulation_points())
+
     # Build undirected adjacency as CSR
     edge_set: set[tuple[int, int]] = set()
     for _, src, dst, _edge in graph.edges():

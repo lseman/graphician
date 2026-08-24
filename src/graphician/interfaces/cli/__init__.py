@@ -43,6 +43,7 @@ from ...analysis.structure import (
 )
 from ...analysis.changes import detect_changes, compute_risk, compute_test_coverage
 from ...analysis.context_pack import build_context_pack
+from ...analysis.coverage import graph_coverage
 from ...analysis.diff import graph_diff
 from ...extraction.compiler import apply_compiler_evidence, load_compiler_evidence
 from ...extraction.rust_analyzer import RustAnalyzerOptions, enrich_with_rust_analyzer
@@ -76,6 +77,13 @@ def main() -> None:
 
     # status
     subparsers.add_parser("status", help="Graph statistics")
+
+    coverage_p = subparsers.add_parser(
+        "coverage", help="Graph extraction and relationship coverage"
+    )
+    coverage_p.add_argument(
+        "--top", type=int, default=20, help="Maximum missing/isolated examples"
+    )
 
     ra_p = subparsers.add_parser(
         "rust-analyzer-enrich", help="Enrich Rust calls using rust-analyzer"
@@ -332,6 +340,7 @@ def main() -> None:
         "build": cmd_build,
         "update": cmd_update,
         "status": cmd_status,
+        "coverage": cmd_coverage,
         "rust-analyzer-enrich": cmd_rust_analyzer_enrich,
         "search": cmd_search,
         "impact": cmd_impact,
@@ -479,6 +488,15 @@ def cmd_status(args: argparse.Namespace) -> None:
     status["graph_freshness"] = graph_freshness(store)
     print(json.dumps(status, indent=2))
     store.close()
+
+
+def cmd_coverage(args: argparse.Namespace) -> None:
+    """Show graph extraction and relationship coverage."""
+    if args.top < 0:
+        raise SystemExit("coverage: --top must be non-negative")
+    with _load_store(args) as store:
+        result = graph_coverage(store.load_graph(), example_limit=args.top)
+    print(json.dumps(result, indent=2))
 
 
 def cmd_rust_analyzer_enrich(args: argparse.Namespace) -> None:

@@ -56,6 +56,7 @@ from .changes import (
     compute_test_coverage,
 )
 from .context_pack import build_context_pack
+from .coverage import graph_coverage
 from .semsearch import semantic_search
 from .flows import compute_flows, FlowOptions
 from .patterns import detect_patterns, FrameworkPattern, PatternMatch
@@ -139,6 +140,7 @@ __all__ = [
     "compute_test_coverage",
     # Context / Semantics
     "build_context_pack",
+    "graph_coverage",
     "semantic_search",
     # Flows
     "compute_flows",

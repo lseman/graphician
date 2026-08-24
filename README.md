@@ -72,6 +72,9 @@ graphician callees "render"
 
 # Execution paths
 graphician paths "main" "process_payment"
+
+# Extraction, call-resolution, connectivity, and test-link coverage
+graphician coverage
 ```
 
 ### Review changes
@@ -100,6 +103,7 @@ graphician tool --operation minimal_context --target "src/main.rs::App" --detail
 | `build` | Full extraction and graph build |
 | `update` | Incremental update from last build |
 | `status` | Graph statistics (nodes, edges, call resolution) |
+| `coverage` | Graph extraction and relationship coverage |
 | `search` | Hybrid semantic + keyword search |
 | `tool` | Generic tool operation interface |
 | `impact` | Symbol change blast radius |

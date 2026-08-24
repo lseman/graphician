@@ -140,6 +140,19 @@ def find_paths(graph: Graph, q: PathQuery) -> list[list[NodeId]]:
 
     Returns paths as lists of node IDs.
     """
+    from .native import native_graph
+
+    snapshot = native_graph(graph)
+    if snapshot is not None:
+        paths = snapshot.paths(
+            q.from_id.value,
+            q.to_id.value if q.to_id is not None else None,
+            q.max_hops,
+            [kind.value for kind in q.edge_kinds] if q.edge_kinds else None,
+            q.min_confidence,
+        )
+        return [[NodeId(node_id) for node_id in path] for path in paths]
+
     results: list[list[NodeId]] = []
     queue: deque[list[NodeId]] = deque([[q.from_id]])
 
@@ -263,12 +276,27 @@ def _node_overlap(a: list[NodeId], b: list[NodeId]) -> float:
 def callees_of(graph: Graph, node_id: NodeId, max_hops: int = 6) -> list[NodeId]:
     """Return all nodes reachable from *node_id* via outgoing ``Calls``
     edges, up to *max_hops*."""
+    from .native import native_graph
+
+    snapshot = native_graph(graph)
+    if snapshot is not None:
+        return [NodeId(value) for value in snapshot.traverse(
+            node_id.value, EdgeKind.CALLS.value, False, max_hops
+        )]
     return _traverse(graph, node_id, EdgeKind.CALLS, max_hops)
 
 
 def callers_of(graph: Graph, node_id: NodeId, max_hops: int = 6) -> list[NodeId]:
     """Return all nodes that can reach *node_id* via ``Calls`` edges
     (incoming ``Calls``)."""
+    from .native import native_graph
+
+    snapshot = native_graph(graph)
+    if snapshot is not None:
+        return [NodeId(value) for value in snapshot.traverse(
+            node_id.value, EdgeKind.CALLS.value, True, max_hops
+        )]
+
     visited: set[int] = {node_id.value}
     queue: deque[int] = deque()
     for prev, edge in graph.in_neighbors(node_id):
@@ -291,6 +319,12 @@ def callers_of(graph: Graph, node_id: NodeId, max_hops: int = 6) -> list[NodeId]
 def max_depth_from(graph: Graph, node_id: NodeId, max_hops: int = 20) -> int:
     """Return the greatest hop count reachable from *node_id* via
     outgoing edges (0 if no outgoing edges)."""
+    from .native import native_graph
+
+    snapshot = native_graph(graph)
+    if snapshot is not None:
+        return snapshot.max_depth(node_id.value, max_hops)
+
     visited: dict[int, int] = {node_id.value: 0}
     queue: deque[int] = deque([node_id.value])
     max_depth = 0

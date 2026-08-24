@@ -1,6 +1,6 @@
-# Rust Extraction Extension
+# Graphician Native Engine
 
-High-performance Python code extraction using tree-sitter Rust bindings.
+High-performance code extraction and graph analysis exposed to Python through PyO3.
 
 ## Quick Start
 
@@ -50,9 +50,10 @@ extract_python_file(Path("my_module.py"), graph)
 ### Build steps
 
 ```bash
-cd graphician-extract
+cd graphician-native
 cargo build --release
-cp target/release/libgraphician_extract.so ../src/graphician/_extract/
+cp target/release/libgraphician_native.so \
+  ../src/graphician/_extract/graphician_native.abi3.so
 ```
 
 The `.so` file is platform-specific. For deployment, build on each target platform.

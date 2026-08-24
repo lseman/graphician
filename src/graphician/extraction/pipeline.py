@@ -9,30 +9,34 @@ conventions. File discovery uses walkdir-like traversal with ignore support.
 
 from __future__ import annotations
 
-import hashlib
 import fnmatch
+import hashlib
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
 from typing import Any
 
+from .._extract import HAS_RUST
 from ..core.edge import Edge, EdgeKind
-from ..core.node import NodeKind
 from ..core.graph import Graph
-from ..core.id import EdgeId, NodeId
-from ..core.node import Node
+from ..core.id import NodeId
+from ..core.node import Node, NodeKind
 from .languages import Language, LanguageRegistry
-from .data_flow import extract_data_flow
+
+if HAS_RUST:
+    from .._extract.python import extract_data_flow
+else:
+    from .data_flow import extract_data_flow
 from .call_resolution import resolve_call_placeholders
-from .type_resolution import resolve_type_placeholders
-from .library_stubs import resolve_library_stubs_batch
-from .patterns.framework_patterns import detect_patterns
-from .flows import compute_flows, FlowOptions
 from .documents import extract_html, extract_markdown, resolve_mentions
 from .documents.svg import extract_svg
+from .flows import FlowOptions, compute_flows
 from .languages.tsconfig_resolver import resolve_ts_path_aliases
+from .library_stubs import resolve_library_stubs_batch
 from .manifests import extract_manifest
+from .patterns.framework_patterns import detect_patterns
+from .type_resolution import resolve_type_placeholders
 
 logger = logging.getLogger(__name__)
 

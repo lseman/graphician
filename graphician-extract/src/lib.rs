@@ -3,7 +3,7 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 use serde_json::json;
-use tree_sitter::Node;
+use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
 
 /// Safe text extraction from a tree-sitter node via byte-slicing.
 fn node_text<'a>(node: &Node<'a>, source: &'a [u8]) -> &'a [u8] {
@@ -459,65 +459,78 @@ pub fn should_suppress(name: &str) -> bool {
     should_suppress_call_placeholder(name) || is_generic_name(name)
 }
 
+/// Import text capped at 10KB to bound memory for large nodes.
+pub fn truncated_source_text(source: &str, line_start: usize, line_end: usize) -> Option<String> {
+    if line_start == 0 || line_end == 0 || line_end <= line_start {
+        return None;
+    }
+    let lines: Vec<&str> = source.lines().collect();
+    // tree-sitter rows are 1-indexed (start) → subtract 1 for 0-indexed vec.
+    let s = (line_start - 1).min(lines.len());
+    let e = line_end.min(lines.len());
+    if s >= lines.len() || s >= e {
+        return None;
+    }
+    let text: String = lines[s..e].join("\n");
+    if text.is_empty() {
+        return None;
+    }
+    if text.len() > 10_000 {
+        Some(text.get(..10_000).unwrap_or(&text).to_string())
+    } else {
+        Some(text)
+    }
+}
+
+/// Extract imports using a tree-sitter Query — faster and more robust
+/// than manual child iteration.
 fn emit_imports(
-    node: &Node,
+    root: &Node,
     source: &[u8],
     file_qn: &str,
     result: &mut ExtractionResult,
 ) {
-    for child in node.children(&mut node.walk()) {
-        match child.kind() {
-            "import_statement" => {
-                for c in child.children(&mut child.walk()) {
-                    if c.kind() == "dotted_name" {
-                        let path_text = node_text_str(&c, source);
-                        let mod_qn = format!("module::{}", path_text);
-                        result.nodes.push(ExtractedNode {
-                            kind: "module".to_string(),
-                            qualified_name: mod_qn.clone(),
-                            name: path_text.clone(),
-                            source_uri: None,
-                            line_start: 0,
-                            line_end: 0,
-                            source_text: None,
-                            properties: vec![("dialect".to_string(), "python".to_string())],
-                        });
-                        result.edges.push(ExtractedEdge {
-                            src_qn: file_qn.to_string(),
-                            dst_qn: mod_qn,
-                            kind: "imports".to_string(),
-                            conf_class: "extracted".to_string(),
-                            confidence: 1.0,
-                            properties: vec![],
-                        });
-                    }
-                }
+    let query = Query::new(
+        &tree_sitter_python::LANGUAGE.into(),
+        r#"
+        [
+          (import_statement name: (dotted_name) @path)
+          (import_statement (aliased_import (dotted_name) @path))
+          (import_from_statement module_name: (dotted_name) @path)
+        ]
+        "#,
+    )
+    .expect("import query is valid");
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(&query, *root, source);
+    while let Some(m) = matches.next() {
+        for cap in m.captures {
+            if cap.node.kind() != "dotted_name" {
+                continue;
             }
-            "import_from_statement" => {
-                if let Some(module_name) = child_by_field(&child, "module_name") {
-                    let path_text = node_text_str(&module_name, source);
-                    let mod_qn = format!("module::{}", path_text);
-                    result.nodes.push(ExtractedNode {
-                        kind: "module".to_string(),
-                        qualified_name: mod_qn.clone(),
-                        name: path_text.clone(),
-                        source_uri: None,
-                        line_start: 0,
-                        line_end: 0,
-                        source_text: None,
-                        properties: vec![("dialect".to_string(), "python".to_string())],
-                    });
-                    result.edges.push(ExtractedEdge {
-                        src_qn: file_qn.to_string(),
-                        dst_qn: mod_qn,
-                        kind: "imports".to_string(),
-                        conf_class: "extracted".to_string(),
-                        confidence: 1.0,
-                        properties: vec![],
-                    });
-                }
+            let path_text = node_text_str(&cap.node, source);
+            if path_text.is_empty() {
+                continue;
             }
-            _ => {}
+            let mod_qn = format!("module::{}", path_text);
+            result.nodes.push(ExtractedNode {
+                kind: "module".to_string(),
+                qualified_name: mod_qn.clone(),
+                name: path_text,
+                source_uri: None,
+                line_start: 0,
+                line_end: 0,
+                source_text: None,
+                properties: vec![("dialect".to_string(), "python".to_string())],
+            });
+            result.edges.push(ExtractedEdge {
+                src_qn: file_qn.to_string(),
+                dst_qn: mod_qn,
+                kind: "imports".to_string(),
+                conf_class: "extracted".to_string(),
+                confidence: 1.0,
+                properties: vec![],
+            });
         }
     }
 }
@@ -661,7 +674,7 @@ fn handle_class(
     }
     let node_lines = (node.start_position().row + 1) as usize;
     let node_end = (node.end_position().row + 1) as usize;
-    let source_text = if node.byte_range().is_empty() { None } else { Some(node_text_str(node, source)) };
+    let source_text = truncated_source_text(&node_text_str(node, source), node_lines, node_end);
     result.nodes.push(ExtractedNode {
         kind: kind.to_string(),
         qualified_name: qn.clone(),
@@ -759,7 +772,7 @@ fn handle_function(
     };
     let node_lines = (node.start_position().row + 1) as usize;
     let node_end = (node.end_position().row + 1) as usize;
-    let source_text = if node.byte_range().is_empty() { None } else { Some(node_text_str(node, source)) };
+    let source_text = truncated_source_text(&node_text_str(node, source), node_lines, node_end);
     result.nodes.push(ExtractedNode {
         kind,
         qualified_name: qn.clone(),

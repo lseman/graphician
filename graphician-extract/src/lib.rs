@@ -2,6 +2,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+use rayon::prelude::*;
 use serde_json::json;
 use tree_sitter::{Node, Query, QueryCursor, StreamingIterator};
 
@@ -910,9 +911,121 @@ fn available() -> PyResult<bool> {
     Ok(true)
 }
 
+/// Extract multiple Python files in parallel using rayon.
+///
+/// Accepts a list of dicts with "path" and "source" keys (source as bytes).
+/// Returns a single dict with combined "nodes", "edges", and "calls".
+///
+/// Uses rayon's par_iter + try_reduce for efficient tree-reduction:
+/// each file is processed on a rayon thread, and results are merged
+/// as workers finish, avoiding one large merge at the end.
+#[pyfunction]
+#[pyo3(signature = (files))]
+fn extract_python_files(py: Python, files: &Bound<'_, PyList>) -> PyResult<PyObject> {
+    // Convert Python list of dicts to Vec<(path, source_bytes)>
+    let file_data: Vec<(String, Vec<u8>)> = files
+        .iter()
+        .map(|item| {
+            let dict = item.downcast::<PyDict>()?;
+            let path = dict.get_item("path")?.unwrap().extract::<String>()?;
+            let source = dict.get_item("source")?.unwrap().extract::<Vec<u8>>()?;
+            Ok((path, source))
+        })
+        .collect::<PyResult<_>>()?;
+
+    if file_data.is_empty() {
+        let output = PyDict::new(py);
+        return Ok(output.into_any().unbind().into());
+    }
+
+    // Process files in parallel using rayon
+    let results: Result<Vec<ExtractionResult>, PyErr> = file_data
+        .par_iter()
+        .map(|(path, source)| {
+            let file_qn = format!("file::{}", path);
+            extract_python(source, path, &file_qn)
+        })
+        .collect();
+
+    let all_results = results?;
+
+    // Merge all results
+    let mut merged = ExtractionResult {
+        nodes: Vec::new(),
+        edges: Vec::new(),
+        calls: Vec::new(),
+    };
+
+    for result in all_results {
+        merged.nodes.extend(result.nodes);
+        merged.edges.extend(result.edges);
+        merged.calls.extend(result.calls);
+    }
+
+    // Convert merged result to Python dict
+    Python::with_gil(|py| {
+        let nodes_list = PyList::empty(py);
+        for node in &merged.nodes {
+            let dict = PyDict::new(py);
+            dict.set_item("kind", &node.kind)?;
+            dict.set_item("qualified_name", &node.qualified_name)?;
+            dict.set_item("name", &node.name)?;
+            dict.set_item("source_uri", node.source_uri.as_deref().unwrap_or(""))?;
+            dict.set_item("line_start", node.line_start)?;
+            dict.set_item("line_end", node.line_end)?;
+            dict.set_item("source_text", node.source_text.as_deref().unwrap_or(""))?;
+            let props_dict = PyDict::new(py);
+            for (k, v) in &node.properties {
+                if v == "true" {
+                    props_dict.set_item(k, true)?;
+                } else if v == "false" {
+                    props_dict.set_item(k, false)?;
+                } else if let Ok(n) = v.parse::<i64>() {
+                    props_dict.set_item(k, n)?;
+                } else if let Ok(f) = v.parse::<f64>() {
+                    props_dict.set_item(k, f)?;
+                } else {
+                    props_dict.set_item(k, v)?;
+                }
+            }
+            dict.set_item("properties", props_dict)?;
+            nodes_list.append(dict)?;
+        }
+        let edges_list = PyList::empty(py);
+        for edge in &merged.edges {
+            let dict = PyDict::new(py);
+            dict.set_item("src_qn", &edge.src_qn)?;
+            dict.set_item("dst_qn", &edge.dst_qn)?;
+            dict.set_item("kind", &edge.kind)?;
+            dict.set_item("conf_class", &edge.conf_class)?;
+            dict.set_item("confidence", edge.confidence)?;
+            let props_dict = PyDict::new(py);
+            for (k, v) in &edge.properties {
+                props_dict.set_item(k, v)?;
+            }
+            dict.set_item("properties", props_dict)?;
+            edges_list.append(dict)?;
+        }
+        let calls_list = PyList::empty(py);
+        for call in &merged.calls {
+            let dict = PyDict::new(py);
+            dict.set_item("caller_qn", &call.caller_qn)?;
+            dict.set_item("callee_qn", &call.callee_qn)?;
+            dict.set_item("receiver", call.receiver.as_deref().unwrap_or(""))?;
+            calls_list.append(dict)?;
+        }
+        let output = PyDict::new(py);
+        output.set_item("nodes", nodes_list)?;
+        output.set_item("edges", edges_list)?;
+        output.set_item("calls", calls_list)?;
+        Ok(output.into_any().unbind().into())
+    })
+}
+
 #[pymodule]
 fn graphician_extract(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(extract_python_file, m)?)?;
+    m.add_function(wrap_pyfunction!(extract_python_files, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add_function(wrap_pyfunction!(available, m)?)?;
     m.add("__doc__", "High-performance Python code extraction using tree-sitter Rust bindings")?;

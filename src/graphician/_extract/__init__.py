@@ -23,13 +23,15 @@ if _lib_path.exists():
     _mod = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
     extract_python_file = _mod.extract_python_file
+    extract_python_files = _mod.extract_python_files
     available = _mod.available
     version = _mod.version
     HAS_RUST = True
 else:
     HAS_RUST = False
     extract_python_file = None
+    extract_python_files = None
     available = lambda: False
     version = lambda: "0.0.0"
 
-__all__ = ["extract_python_file", "available", "version", "HAS_RUST"]
+__all__ = ["extract_python_file", "extract_python_files", "available", "version", "HAS_RUST"]

@@ -1,6 +1,8 @@
 """Structural analysis: cycles, dead code, counterfactual, motifs, surprises.
 
 Graph algorithms for understanding architectural properties.
+
+Optimized versions use numpy/numba for performance-critical paths.
 """
 
 from __future__ import annotations
@@ -11,11 +13,14 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator
 
 import networkx as nx
+import numpy as np
 
 from ..core.edge import Edge, EdgeKind
 from ..core.graph import Graph
 from ..core.id import NodeId
 from ..core.node import Node, NodeKind
+from .adjacency import build_adjacency_matrix
+from .numba_graph_algs import has_numba as has_numba_algs
 from .export import export_graphml
 
 
@@ -117,36 +122,68 @@ def cyclic_components(graph: Graph) -> list[Component]:
 def core_numbers(graph: Graph) -> dict[NodeId, int]:
     """K-core decomposition of the undirected view of the graph.
 
+    Uses numba-accelerated algorithm when available, falling back to
+    the pure-Python heap-based implementation.
+
     Returns a mapping from NodeId to its k-core number.
     """
-    # Build undirected adjacency
-    adj: dict[int, set[int]] = defaultdict(set)
+    # Build undirected adjacency as CSR
+    # First, collect all unique edges (undirected)
+    edge_set: set[tuple[int, int]] = set()
     for _, src, dst, _edge in graph.edges():
         if src != dst:
-            adj[src.value].add(dst.value)
-            adj[dst.value].add(src.value)
+            edge_set.add((min(src.value, dst.value), max(src.value, dst.value)))
 
-    all_nodes: set[int] = set(nid.value for nid, _ in graph.nodes())
-    remaining: set[int] = set(all_nodes)
-    degree: dict[int, int] = {
-        nid: len(adj.get(nid, set()) & remaining)
-        for nid in all_nodes
-    }
+    all_nodes: list[int] = [nid.value for nid, _ in graph.nodes()]
+    n = len(all_nodes)
+    node_to_idx: dict[int, int] = {v: i for i, v in enumerate(all_nodes)}
+
+    # Build CSR from edge set
+    adj_map: dict[int, set[int]] = defaultdict(set)
+    for u, v in edge_set:
+        u_idx = node_to_idx.get(u)
+        v_idx = node_to_idx.get(v)
+        if u_idx is not None and v_idx is not None:
+            adj_map[u_idx].add(v_idx)
+            adj_map[v_idx].add(u_idx)
+
+    # Build CSR arrays
+    nnz = sum(len(v) for v in adj_map.values())
+    row_ptr = np.zeros(n + 1, dtype=np.intp)
+    col_idx = np.zeros(nnz, dtype=np.intp)
+
+    pos = 0
+    for i in range(n):
+        row_ptr[i + 1] = row_ptr[i] + len(adj_map.get(i, set()))
+
+    for i in range(n):
+        start = row_ptr[i]
+        for j, v in enumerate(sorted(adj_map.get(i, set()))):
+            col_idx[start + j] = v
+
+    # Use numba-accelerated k-core if available
+    if has_numba_algs():
+        from .numba_graph_algs import kcore_csr
+        cores = kcore_csr(row_ptr, col_idx)
+        return {NodeId(all_nodes[i]): int(cores[i]) for i in range(n)}
+
+    # Fallback: pure Python heap-based
+    remaining: set[int] = set(range(n))
+    degree: dict[int, int] = {i: len(adj_map.get(i, set())) for i in range(n)}
     core_map: dict[NodeId, int] = {}
     current_core = 0
-    heap = [(node_degree, node) for node, node_degree in degree.items()]
+    heap = [(d, i) for i, d in degree.items()]
     heapq.heapify(heap)
 
     while heap:
         min_degree, node = heapq.heappop(heap)
-        if node not in remaining or min_degree != degree[node]:
+        if node not in remaining or min_degree != degree.get(node, 0):
             continue
         current_core = max(current_core, min_degree)
-        core_map[NodeId(node)] = current_core
+        core_map[NodeId(all_nodes[node])] = current_core
         remaining.discard(node)
 
-        # Decrease degree of neighbors
-        for neighbor in adj.get(node, set()):
+        for neighbor in adj_map.get(node, set()):
             if neighbor in remaining:
                 degree[neighbor] = max(0, degree[neighbor] - 1)
                 heapq.heappush(heap, (degree[neighbor], neighbor))
@@ -158,15 +195,49 @@ def approx_betweenness(graph: Graph, max_sources: int = 64) -> dict[NodeId, floa
     """Approximate betweenness centrality via BFS from up to max_sources nodes.
 
     Uses the undirected view of the graph for shortest paths.
+    Uses numba-accelerated implementation when available.
     """
-    # Build undirected adjacency
-    adj: dict[int, set[int]] = defaultdict(set)
+    # Build undirected adjacency as CSR
+    edge_set: set[tuple[int, int]] = set()
     for _, src, dst, _edge in graph.edges():
         if src != dst:
-            adj[src.value].add(dst.value)
-            adj[dst.value].add(src.value)
+            edge_set.add((min(src.value, dst.value), max(src.value, dst.value)))
 
     all_nodes: list[int] = [nid.value for nid, _ in graph.nodes()]
+    n = len(all_nodes)
+    node_to_idx: dict[int, int] = {v: i for i, v in enumerate(all_nodes)}
+
+    adj_map: dict[int, set[int]] = defaultdict(set)
+    for u, v in edge_set:
+        u_idx = node_to_idx.get(u)
+        v_idx = node_to_idx.get(v)
+        if u_idx is not None and v_idx is not None:
+            adj_map[u_idx].add(v_idx)
+            adj_map[v_idx].add(u_idx)
+
+    # Build CSR arrays
+    nnz = sum(len(v) for v in adj_map.values())
+    row_ptr = np.zeros(n + 1, dtype=np.intp)
+    col_idx = np.zeros(nnz, dtype=np.intp)
+
+    for i in range(n):
+        row_ptr[i + 1] = row_ptr[i] + len(adj_map.get(i, set()))
+
+    for i in range(n):
+        start = row_ptr[i]
+        for j, v in enumerate(sorted(adj_map.get(i, set()))):
+            col_idx[start + j] = v
+
+    sources = all_nodes[:max_sources]
+    source_indices = np.array([node_to_idx[s] for s in sources if s in node_to_idx], dtype=np.intp)
+
+    # Use numba-accelerated betweenness if available
+    if has_numba_algs():
+        from .numba_graph_algs import betweenness_approx_csr
+        scores_arr = betweenness_approx_csr(row_ptr, col_idx, source_indices, max_sources)
+        return {NodeId(all_nodes[i]): float(scores_arr[i]) for i in range(n)}
+
+    # Fallback: pure Python BFS
     sources = all_nodes[:max_sources]
     scores: dict[NodeId, float] = defaultdict(float)
 
@@ -183,12 +254,13 @@ def approx_betweenness(graph: Graph, max_sources: int = 64) -> dict[NodeId, floa
             head += 1
             order.append(node)
             next_dist = dist[node] + 1
-            for neighbor in adj.get(node, set()):
-                if neighbor not in dist:
-                    dist[neighbor] = next_dist
-                    queue.append(neighbor)
-                if dist.get(neighbor) == next_dist:
-                    pred[neighbor].append(node)
+            for neighbor in adj_map.get(node_to_idx.get(node, -1), set()):
+                neighbor_node = all_nodes[neighbor]
+                if neighbor_node not in dist:
+                    dist[neighbor_node] = next_dist
+                    queue.append(neighbor_node)
+                if dist.get(neighbor_node) == next_dist:
+                    pred[neighbor_node].append(node)
 
         # Dependency accumulation (reverse order)
         dependency: dict[int, float] = defaultdict(float)
@@ -256,7 +328,48 @@ def bridge_scores(
 
 
 def _articulation_points(graph: Graph) -> list[int]:
-    """Internal: articulation points on undirected view (returns node IDs)."""
+    """Internal: articulation points on undirected view (returns node IDs).
+    
+    Uses numba-accelerated iterative algorithm when available.
+    """
+    # Build undirected adjacency as CSR
+    edge_set: set[tuple[int, int]] = set()
+    for _, src, dst, _edge in graph.edges():
+        if src != dst:
+            edge_set.add((min(src.value, dst.value), max(src.value, dst.value)))
+
+    all_nodes: list[int] = [nid.value for nid, _ in graph.nodes()]
+    n = len(all_nodes)
+    node_to_idx: dict[int, int] = {v: i for i, v in enumerate(all_nodes)}
+
+    adj_map: dict[int, set[int]] = defaultdict(set)
+    for u, v in edge_set:
+        u_idx = node_to_idx.get(u)
+        v_idx = node_to_idx.get(v)
+        if u_idx is not None and v_idx is not None:
+            adj_map[u_idx].add(v_idx)
+            adj_map[v_idx].add(u_idx)
+
+    # Build CSR arrays
+    nnz = sum(len(v) for v in adj_map.values())
+    row_ptr = np.zeros(n + 1, dtype=np.intp)
+    col_idx = np.zeros(nnz, dtype=np.intp)
+
+    for i in range(n):
+        row_ptr[i + 1] = row_ptr[i] + len(adj_map.get(i, set()))
+
+    for i in range(n):
+        start = row_ptr[i]
+        for j, v in enumerate(sorted(adj_map.get(i, set()))):
+            col_idx[start + j] = v
+
+    # Use numba-accelerated articulation points if available
+    if has_numba_algs():
+        from .numba_graph_algs import articulation_points_csr
+        is_art = articulation_points_csr(row_ptr, col_idx)
+        return [all_nodes[i] for i in range(n) if is_art[i]]
+
+    # Fallback: iterative DFS (avoiding recursion limit)
     adj: dict[int, set[int]] = defaultdict(set)
     for _, src, dst, _edge in graph.edges():
         if src != dst:
@@ -266,35 +379,60 @@ def _articulation_points(graph: Graph) -> list[int]:
     visited: set[int] = set()
     discovery: dict[int, int] = {}
     low: dict[int, int] = {}
-    time = [0]
+    time_counter = [0]
     points: set[int] = set()
 
-    def dfs(node: int, parent: int | None) -> None:
-        visited.add(node)
-        discovery[node] = time[0]
-        low[node] = time[0]
-        time[0] += 1
-        children = 0
-
-        for neighbor in adj.get(node, set()):
-            if neighbor == parent:
-                continue
-            if neighbor not in visited:
-                children += 1
-                dfs(neighbor, node)
-                low[node] = min(low[node], low[neighbor])
-                if parent is not None and low[neighbor] >= discovery[node]:
-                    points.add(node)
-            else:
-                low[node] = min(low[node], discovery[neighbor])
-
-        if parent is None and children > 1:
-            points.add(node)
-
+    # Iterative DFS with explicit stack
     for nid, _ in graph.nodes():
         nid_val = nid.value
-        if nid_val not in visited:
-            dfs(nid_val, None)
+        if nid_val in visited:
+            continue
+
+        # Stack entries: (node, parent, neighbor_index, children_count)
+        stack: list[tuple[int, int | None, int, int]] = [(nid_val, None, 0, 0)]
+        child_count: dict[int, int] = {nid_val: 0}
+
+        while stack:
+            node, parent, nidx, _ = stack[-1]
+
+            if node not in visited:
+                visited.add(node)
+                discovery[node] = time_counter[0]
+                low[node] = time_counter[0]
+                time_counter[0] += 1
+
+            neighbors = adj.get(node, set())
+            neighbor_list = list(neighbors)
+
+            if nidx < len(neighbor_list):
+                # Update stack with next neighbor
+                stack[-1] = (node, parent, nidx + 1, child_count.get(node, 0))
+                neighbor = neighbor_list[nidx]
+
+                if neighbor == parent:
+                    continue
+
+                if neighbor not in visited:
+                    child_count[node] = child_count.get(node, 0) + 1
+                    stack.append((neighbor, node, 0, 0))
+                else:
+                    # Back edge
+                    low[node] = min(low[node], discovery[neighbor])
+            else:
+                # All neighbors processed, pop stack
+                stack.pop()
+
+                # Update parent's low value
+                if parent is not None:
+                    low[parent] = min(low[parent], low[node])
+
+                    # Check articulation point condition
+                    if low[node] >= discovery[parent]:
+                        child_count[parent] = child_count.get(parent, 0) + 1
+                        if parent != nid_val and child_count[parent] > 1:
+                            points.add(parent)
+                        elif parent == nid_val and child_count[parent] > 1:
+                            points.add(parent)
 
     return list(points)
 

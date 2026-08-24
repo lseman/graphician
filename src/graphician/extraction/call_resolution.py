@@ -51,15 +51,11 @@ _SUPPRESS_CALLS = frozenset([
     "set", "sorted", "str", "sum", "super", "tuple", "type", "vars",
     "zip",
     # High-frequency string/collection methods (Python & Rust style).
-    "append", "extend", "insert", "pop", "remove", "clear", "update",
-    "items", "keys", "values", "get", "setdefault", "popitem",
-    "defaultdict", "Counter", "OrderedDict",
-    "lower", "upper", "strip", "rstrip", "lstrip", "split", "join",
-    "startswith", "endswith", "replace", "find", "rfind",
-    "index", "rindex", "count", "capitalize", "title", "swapcase",
-    "isalpha", "isdigit", "isalnum", "isspace", "islower", "isupper", "isdecimal", "isprintable", "istitle", "isascii", "isnumeric", "isxdigit",
-    "isdecimal", "isprintable", "istitle",
-    "sort", "reverse", "copy", "__iter__", "__len__", "__getitem__",
+    # NOTE: Common methods like append, items, sort, split, join, etc.
+    # are intentionally LEFT UNSUPPRESSED so the stub resolver can match
+    # them against known library type stubs (list, dict, str, Path, etc.).
+    # Only keep truly noisy methods that lack stub coverage:
+    "pop", "remove", "__iter__", "__len__", "__getitem__",
     "__setitem__", "__delitem__", "__contains__", "__eq__", "__ne__",
     "__lt__", "__le__", "__gt__", "__ge__", "__hash__", "__bool__",
     "__repr__", "__str__", "__format__", "__enter__", "__exit__",

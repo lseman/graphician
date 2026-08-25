@@ -51,7 +51,9 @@ def find_motifs(graph: Graph, motif: Motif, limit: int = 50) -> list[MotifMatch]
             if node_constraint.name is not None and not node_constraint.name.matches(node.name):
                 continue
             if node_constraint.min_degree is not None:
-                deg = graph.out_degree(nid) + graph.in_degree(nid)
+                deg = sum(1 for _ in graph.out_neighbors(nid)) + sum(
+                    1 for _ in graph.in_neighbors(nid)
+                )
                 if deg < node_constraint.min_degree:
                     continue
             candidates.append(nid)
@@ -71,13 +73,13 @@ def find_motifs(graph: Graph, motif: Motif, limit: int = 50) -> list[MotifMatch]
         for mapping in native_matches:
             node_map = {index: NodeId(node_id) for index, node_id in enumerate(mapping)}
             edges_out: list[tuple[str, str, str]] = []
-            for edge in motif.edges:
-                src_node = graph.node(node_map[edge.from_id])
-                dst_node = graph.node(node_map[edge.to_id])
+            for motif_edge in motif.edges:
+                src_node = graph.node(node_map[motif_edge.from_id])
+                dst_node = graph.node(node_map[motif_edge.to_id])
                 if src_node is not None and dst_node is not None:
                     edges_out.append((
                         src_node.qualified_name,
-                        edge.kind.value if edge.kind else "any",
+                        motif_edge.kind.value if motif_edge.kind else "any",
                         dst_node.qualified_name,
                     ))
             results.append(MotifMatch(node_map=node_map, edges=edges_out))

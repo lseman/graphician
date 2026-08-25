@@ -88,14 +88,14 @@ def resolve_ts_path_aliases(
             details.append({"module": mod_name, "reason": "alias_not_found"})
             continue
 
-        resolved_path = Path(resolved_path)
-        resolved_qn = f"file::{resolved_path}"
-        stem = resolved_path.stem if resolved_path.stem else resolved_path.name
+        resolved_path_obj = Path(resolved_path)
+        resolved_qn = f"file::{resolved_path_obj}"
+        stem = resolved_path_obj.stem if resolved_path_obj.stem else resolved_path_obj.name
         graph.rename_node(mod_id, resolved_qn, stem)
         resolved += 1
         details.append({
             "module": mod_name,
-            "resolved": str(resolved_path),
+            "resolved": str(resolved_path_obj),
             "reason": "success",
         })
 

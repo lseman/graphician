@@ -23,7 +23,7 @@ def split_oversized(
     """
     # Get initial communities
     initial_communities = leiden_with_options(graph, CommunityOptions(max_passes=10, max_levels=5))
-    total_nodes = graph.nodes().__length_hint__() if hasattr(graph.nodes(), '__length_hint__') else sum(1 for _ in graph.nodes())
+    total_nodes = graph.node_count()
     threshold = max(int(total_nodes * threshold_pct), min_size)
 
     # Build community membership (node_id -> cid)

@@ -73,7 +73,7 @@ def _entropy_term(probability: float) -> float:
 def infomap(
     graph: Graph,
     options: CommunityOptions | None = None,
-) -> dict[int, set[int]]:
+) -> dict[NodeId, int]:
     """Infomap community detection with LMDL optimization.
 
     Mirrors Rust ``infomap`` (infomap.rs:6-8).
@@ -86,7 +86,7 @@ def infomap(
         options: Detection options. Defaults to CommunityOptions().
 
     Returns:
-        Mapping from node index to community id (set-based).
+        Mapping from node id to community label.
     """
     if options is None:
         options = CommunityOptions()
@@ -96,7 +96,7 @@ def infomap(
 def infomap_with_options(
     graph: Graph,
     options: CommunityOptions,
-) -> dict[int, set[int]]:
+) -> dict[NodeId, int]:
     """Infomap with explicit options.
 
     Mirrors Rust ``infomap_with_options`` (infomap.rs:10-29).

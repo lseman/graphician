@@ -256,7 +256,7 @@ def _search_json(db_path: str, query: str, request_path: str) -> str:
             "label": node.name,
             "qname": node.qualified_name,
             "kind": node.kind.value,
-            "signals": hit.signals,
+            "signals": hit.reasons,
         })
 
     total = len(results)

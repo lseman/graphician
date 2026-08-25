@@ -30,7 +30,7 @@ from .utils import _find_cross_community_edges, _modularity, _to_networkx
 def louvain(
     graph: Graph,
     options: CommunityOptions | None = None,
-) -> dict[int, set[int]]:
+) -> dict[NodeId, int]:
     """Louvain community detection with full multi-level optimization.
 
     Mirrors Rust ``louvain`` (louvain.rs:5-7).
@@ -40,7 +40,7 @@ def louvain(
         options: Detection options. Defaults to CommunityOptions().
 
     Returns:
-        Mapping from node index to community id (set-based).
+        Mapping from node id to community label.
     """
     if options is None:
         options = CommunityOptions()
@@ -50,7 +50,7 @@ def louvain(
 def louvain_with_options(
     graph: Graph,
     options: CommunityOptions,
-) -> dict[int, set[int]]:
+) -> dict[NodeId, int]:
     """Louvain with explicit options.
 
     Mirrors Rust ``louvain_with_options`` (louvain.rs:9-20).

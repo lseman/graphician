@@ -83,8 +83,8 @@ class GraphStore:
 
     def __init__(self, db_path: str | Path, read_only: bool = False) -> None:
         self.db_path = Path(db_path)
-        flags = sqlite3.URI if str(db_path).startswith("file:") else 0
-        self._conn = sqlite3.connect(str(self.db_path), uri=(flags != 0))
+        is_uri = str(db_path).startswith("file:")
+        self._conn = sqlite3.connect(str(self.db_path), uri=is_uri)
         self._closed = False
         self._conn.row_factory = sqlite3.Row
         try:

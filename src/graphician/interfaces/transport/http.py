@@ -250,9 +250,9 @@ def serve_http(host: str = "127.0.0.1", port: int = 8080, db: str | None = None)
         port: Bind port.
         db: Path to the graph database.
     """
+    GraphicianHTTPHandler.graph_db = db
+    GraphicianHTTPHandler.algorithm = "leiden"
     server = HTTPServer((host, port), GraphicianHTTPHandler)
-    server.graph_db = db
-    server.algorithm = "leiden"
     print(f"Graphician HTTP server running at http://{host}:{port}")
     print(f"  Graph database: {db or 'not configured'}")
     print("  Press Ctrl+C to stop")

@@ -34,7 +34,7 @@ from .utils import _find_cross_community_edges, _modularity, _to_networkx
 def leiden(
     graph: Graph,
     options: CommunityOptions | None = None,
-) -> dict[int, set[int]]:
+) -> dict[NodeId, int]:
     """Leiden algorithm — Louvain with refinement.
 
     Guarantees well-connected communities by refining each partition
@@ -47,7 +47,7 @@ def leiden(
         options: Detection options. Defaults to CommunityOptions().
 
     Returns:
-        Mapping from node index to community id (set-based).
+        Mapping from node id to community label.
     """
     if options is None:
         options = CommunityOptions()
@@ -57,7 +57,7 @@ def leiden(
 def leiden_with_options(
     graph: Graph,
     options: CommunityOptions,
-) -> dict[int, set[int]]:
+) -> dict[NodeId, int]:
     """Leiden with explicit options.
 
     Mirrors Rust ``leiden_with_options`` (leiden.rs:9-20).

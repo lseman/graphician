@@ -71,11 +71,7 @@ def _extract_custom(path: Path, graph, lang_def: LanguageDef) -> None:
     if raw_language is None:
         return
     language = raw_language if isinstance(raw_language, Language) else Language(raw_language)
-    try:
-        parser = Parser(language)
-    except TypeError:  # tree-sitter < 0.25
-        parser = Parser()
-        parser.set_language(language)
+    parser = Parser(language)
     tree = parser.parse(source.encode("utf-8"))
 
     file_uri = str(path)

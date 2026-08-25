@@ -9,6 +9,10 @@ import enum
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import tree_sitter
 
 
 class Language(enum.StrEnum):
@@ -27,7 +31,7 @@ class LanguageSpec:
     """Configuration for extracting a single language."""
     name: Language
     extensions: list[str]
-    parser_factory: Callable[[], object]  # Returns tree-sitter parser
+    parser_factory: Callable[[], tree_sitter.Parser]
     # Patterns to extract from AST
     extract_file: bool = True
     extract_functions: bool = True
@@ -142,7 +146,7 @@ class LanguageRegistry:
             self._lang_to_spec[spec.name] = spec
 
     @staticmethod
-    def _make_parser(lang_ptr: object) -> object:
+    def _make_parser(lang_ptr: object) -> tree_sitter.Parser:
         """Create a tree-sitter Parser from a language pointer."""
         from tree_sitter import Language as TreeSitterLanguage
         from tree_sitter import Parser
@@ -152,12 +156,7 @@ class LanguageRegistry:
             if isinstance(lang_ptr, TreeSitterLanguage)
             else TreeSitterLanguage(lang_ptr)
         )
-        try:
-            return Parser(language)
-        except TypeError:  # tree-sitter < 0.25
-            parser = Parser()
-            parser.set_language(language)
-            return parser
+        return Parser(language)
 
     def get_spec(self, path: Path) -> LanguageSpec | None:
         """Get language spec for a file path, or None if unsupported."""

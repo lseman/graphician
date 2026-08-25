@@ -19,25 +19,24 @@ from pathlib import Path
 from typing import Any
 
 from .._extract import HAS_RUST
+from .._extract.python import extract_data_flow as _native_extract_data_flow
 from ..core.edge import Edge, EdgeKind
 from ..core.graph import Graph
 from ..core.id import NodeId
 from ..core.node import Node, NodeKind
-from .languages import Language, LanguageRegistry
-
-if HAS_RUST:
-    from .._extract.python import extract_data_flow
-else:
-    from .data_flow import extract_data_flow
 from .call_resolution import resolve_call_placeholders
+from .data_flow import extract_data_flow as _python_extract_data_flow
 from .documents import extract_html, extract_markdown, resolve_mentions
 from .documents.svg import extract_svg
 from .flows import FlowOptions, compute_flows
+from .languages import Language, LanguageRegistry
 from .languages.tsconfig_resolver import resolve_ts_path_aliases
 from .library_stubs import resolve_library_stubs_batch
 from .manifests import extract_manifest
 from .patterns.framework_patterns import detect_patterns
 from .type_resolution import resolve_type_placeholders
+
+extract_data_flow = _native_extract_data_flow if HAS_RUST else _python_extract_data_flow
 
 logger = logging.getLogger(__name__)
 

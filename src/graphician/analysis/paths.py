@@ -406,7 +406,7 @@ def _traverse(
             for neighbor in neighbors:
                 if not visited[neighbor]:
                     visited[neighbor] = True
-                    results.append(all_nodes[neighbor])
+                    results.append(NodeId(all_nodes[neighbor]))
                     if depth + 1 <= max_hops:
                         queue[depth + 1, queue_counts[depth + 1]] = neighbor
                         queue_counts[depth + 1] += 1
@@ -487,7 +487,7 @@ def _bfs_optimized(
             for neighbor in neighbors:
                 if not visited[neighbor]:
                     visited[neighbor] = True
-                    results.append(all_nodes[neighbor])
+                    results.append(NodeId(all_nodes[neighbor]))
                     if depth + 1 <= max_hops:
                         queue[depth + 1, queue_counts[depth + 1]] = neighbor
                         queue_counts[depth + 1] += 1

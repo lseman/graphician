@@ -473,7 +473,8 @@ class GraphStore:
                             node.valid_to,
                         ),
                     )
-                    db_id = int(cursor.lastrowid)
+                    assert cursor.lastrowid is not None
+                    db_id = cursor.lastrowid
                     changed_node_ids.add(db_id)
                 else:
                     db_id = int(existing["id"])

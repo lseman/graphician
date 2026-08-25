@@ -366,7 +366,10 @@ def boost_multi_hit_sources(
     boost_unit = max_score * 0.12
 
     for source, nid in best.items():
-        count = sum(1 for h in hits.values() if h.node and h.node.source_uri == source)
+        count = 0
+        for h in hits.values():
+            if h.node and h.node.source_uri == source:
+                count += 1
         if count < 2:
             continue
 

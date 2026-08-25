@@ -140,11 +140,8 @@ def _add_node(
     # Extract source text by line range (matching ariadne-rust's
     # extract_source_text behaviour) rather than passing the raw bytes.
     # This avoids data_flow from seeing the entire file for every node.
-    source_text = _extract_source_text(source_lines, line_start, line_end)
-    if source_text:
-        node = node.with_source_text(source_text)
-    # Extract source text: if source_lines is a list, use line-range extraction;
-    # if it's a string, use it directly (for FILE nodes).
+    # If source_lines is a list, use line-range extraction; if it's a
+    # string, use it directly (for FILE nodes).
     if isinstance(source_lines, list):
         source_text = _extract_source_text(source_lines, line_start, line_end)
     elif source_lines is not None:
@@ -155,17 +152,6 @@ def _add_node(
         node = node.with_source_text(source_text)
     # Default dialect for Rust
     default_props: dict[str, Any] = {"dialect": "rust"}
-    if props:
-        default_props.update(props)
-    if default_props:
-        for k, v in default_props.items():
-            node = node.with_property(k, v)
-    graph.add_node(node)
-    result = graph.find_by_qname(qn)
-    assert result is not None, f"Node not found after add: {qn}"
-    return result
-    # Default dialect for Rust
-    default_props = {"dialect": "rust"}
     if props:
         default_props.update(props)
     if default_props:

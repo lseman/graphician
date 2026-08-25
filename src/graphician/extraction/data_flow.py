@@ -382,7 +382,11 @@ def _ts_python_dotted_parts(node: Any, source: str) -> list[str]:
     if node.type == "identifier":
         return [node.text.decode(errors="replace")]
     elif node.type == "dotted_name":
-        return [_ts_python_dotted_parts(child, source) for child in node.children if child.children]
+        parts: list[str] = []
+        for child in node.children:
+            if child.children:
+                parts.extend(_ts_python_dotted_parts(child, source))
+        return parts
     return []
 
 

@@ -777,11 +777,11 @@ def cmd_detect_changes(args: argparse.Namespace) -> None:
     if sys.stdin.isatty():
         if args.base:
             import subprocess
-            result = subprocess.run(
+            diff_result = subprocess.run(
                 ["git", "diff", args.base],
                 capture_output=True, text=True
             )
-            diff_text = result.stdout
+            diff_text = diff_result.stdout
         else:
             print("Error: provide --base or pipe diff to stdin", file=sys.stderr)
             sys.exit(1)

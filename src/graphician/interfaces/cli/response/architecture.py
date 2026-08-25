@@ -161,7 +161,7 @@ def _community_summaries(
     detail: str,
 ) -> list[dict[str, Any]]:
     """Generate community summary dicts."""
-    summaries = []
+    summaries: list[dict[str, Any]] = []
     for cid, members in by_comm.items():
         files: dict[str, int] = {}
         kinds: dict[str, int] = {}

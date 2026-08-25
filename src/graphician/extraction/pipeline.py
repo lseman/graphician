@@ -818,7 +818,10 @@ class ExtractionPipeline:
                             base_node = Node.new(NodeKind.CLASS, base_qname)
                             self.graph.add_node(base_node)
                             # Edge goes from the class, not the file
-                            class_id = self.graph.find_by_qname(class_qname)
+                            class_id = (
+                                self.graph.find_by_qname(class_qname)
+                                if class_qname is not None else None
+                            )
                             base_id = self.graph.find_by_qname(base_qname)
                             if class_id is not None and base_id is not None:
                                 self.graph.add_edge(
@@ -847,7 +850,10 @@ class ExtractionPipeline:
                             base_qname = f"type::{base_name}"
                             base_node = Node.new(NodeKind.CLASS, base_qname)
                             self.graph.add_node(base_node)
-                            class_id = self.graph.find_by_qname(class_qname)
+                            class_id = (
+                                self.graph.find_by_qname(class_qname)
+                                if class_qname is not None else None
+                            )
                             base_id = self.graph.find_by_qname(base_qname)
                             if class_id is not None and base_id is not None:
                                 self.graph.add_edge(

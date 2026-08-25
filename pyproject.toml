@@ -56,12 +56,12 @@ ignore = ["E501", "F601"]
 
 [tool.mypy]
 python_version = "3.12"
-# `strict = true` was configured but never actually ran: numpy's stubs use
-# PEP 695 syntax requiring 3.12+, so mypy crashed on import under the old
-# 3.11 target before checking anything. Now that mypy can run to completion,
-# strict mode surfaces ~510 pre-existing errors across 84 files. Relaxed to
-# non-strict here so CI is green; re-enabling `strict = true` is tracked as
-# a follow-up (dominated by missing annotations, attr-defined, and arg-type).
+# Non-strict: the 251 errors surfaced when this repo's mypy config first
+# ran to completion (see git history) are now all fixed and this file's
+# checks are clean. `strict = true` still finds ~260 further errors,
+# almost entirely missing annotations (no-untyped-def, no-untyped-call,
+# untyped-decorator) plus some real gaps (type-arg, no-any-return) --
+# a separate, larger annotation-completeness effort, tracked as follow-up.
 ignore_missing_imports = true
 check_untyped_defs = true
 warn_redundant_casts = true

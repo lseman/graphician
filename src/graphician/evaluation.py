@@ -17,6 +17,7 @@ from .analysis.impact.engine import find_impact
 from .analysis.impact.types import ImpactQuery
 from .analysis.paths import callees_of, callers_of, max_depth_from
 from .analysis.structure import call_resolution_stats
+from .core.id import NodeId
 from .extraction.flows import compute_flows
 from .persistence.store import GraphStore
 
@@ -559,8 +560,8 @@ def _test_coverage(
     - Per-language test coverage rates.
     - Uncovered high-importance symbols (functions with many callers).
     """
-    from ..core.edge import EdgeKind
-    from ..core.node import NodeKind
+    from .core.edge import EdgeKind
+    from .core.node import NodeKind
 
     graph = store.load_graph()
 
@@ -790,15 +791,15 @@ def _call_coverage(_repo: Path, store: GraphStore, _config: dict[str, Any]) -> l
     Measures the proportion of functions with at least one caller or callee,
     and the proportion of functions that are entry points (no callers).
     """
-    from ..core.node import NodeKind
+    from .core.node import NodeKind
 
     graph = store.load_graph()
-    functions: list[tuple[int, int, int]] = []  # (nid, callers, callees)
+    functions: list[tuple[NodeId, int, int]] = []  # (nid, callers, callees)
 
     for nid, node in graph.nodes():
         if node.kind in (NodeKind.FUNCTION, NodeKind.METHOD):
             caller_count = sum(1 for _ in graph.in_neighbors(nid))
-            callee_count = sum(1 for _, dst, _, _ in graph.out_neighbors(nid))
+            callee_count = sum(1 for _ in graph.out_neighbors(nid))
             functions.append((nid, caller_count, callee_count))
 
     total = len(functions) if functions else 1

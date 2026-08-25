@@ -48,10 +48,13 @@ def find_dropped_calls(
 
     # Deduplicate by (line, method_name, enclosing)
     seen: set[tuple[int, str, str]] = set()
-    results = [
-        r for r in results if (r[0], r[2], r[3]) not in seen and not seen.add((r[0], r[2], r[3]))
-    ]
-    return results
+    deduped = []
+    for r in results:
+        key = (r[0], r[2], r[3])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(r)
+    return deduped
 
 
 def _find_identifier_before(chars: list[str], pos: int) -> tuple[int, str] | None:

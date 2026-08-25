@@ -151,7 +151,7 @@ def _compute_communities(graph) -> list[dict[str, Any]]:
     for node_id, community_id in labels.items():
         communities[community_id].append(node_id)
 
-    output = []
+    output: list[dict[str, Any]] = []
     for community_id, members in communities.items():
         size = len(members)
 
@@ -172,7 +172,7 @@ def _compute_communities(graph) -> list[dict[str, Any]]:
 
         dominant_lang = None
         if lang_counts:
-            dominant_lang = max(lang_counts, key=lang_counts.get)
+            dominant_lang = max(lang_counts, key=lambda ext: lang_counts[ext])
 
         output.append({
             "name": f"Community {community_id}",
@@ -249,7 +249,7 @@ def _generate_community_page(graph, comm: dict[str, Any]) -> str:
     lines.append("## Execution Flows")
     lines.append("")
 
-    community_flows: list[tuple[Any, Any]] = []
+    community_flows: list[tuple[Any, Any, Any, Any]] = []
     for nid, node in graph.nodes():
         if node.kind != NodeKind.FLOW:
             continue

@@ -43,6 +43,12 @@ class DataFlowEdge:
     dialect: str = "unknown"
 
 
+def _node_name(graph: Graph, node_id: NodeId) -> str:
+    """Resolve a node's display name, falling back to its id if not found."""
+    node = graph.node(node_id)
+    return node.name if node is not None else str(node_id.value)
+
+
 def extract_data_flow(
     graph: Graph,
     function_id: NodeId,
@@ -159,7 +165,7 @@ def _ts_extract_python(
         return []
 
     edges: list[DataFlowEdge] = []
-    lang = tspython.language()
+    lang = ts.Language(tspython.language())
     parser = ts.Parser(lang)
     tree = parser.parse(source_text.encode())
 
@@ -242,7 +248,7 @@ def _ts_extract_python_assignment(
                 target_id=var_id.value,
                 source_kind="function",
                 target_kind="variable",
-                source_name=function_id.value,
+                source_name=_node_name(graph, function_id),
                 target_name=var_name,
                 flow_type="assignment",
                 source_text=source_text[node.start_point[0]:node.end_point[0] + 1].strip(),
@@ -353,7 +359,7 @@ def _ts_extract_python_return(
             target_id=return_id.value,
             source_kind="function",
             target_kind="return_value",
-            source_name=function_id.value,
+            source_name=_node_name(graph, function_id),
             target_name="return_value",
             flow_type="return_flow",
             source_text=source_text[node.start_point[0]:node.end_point[0] + 1].strip(),
@@ -432,7 +438,7 @@ def _ts_extract_rust(
         return []
 
     edges: list[DataFlowEdge] = []
-    lang = tsrust.language()
+    lang = ts.Language(tsrust.language())
     parser = ts.Parser(lang)
     tree = parser.parse(source_text.encode())
 
@@ -500,7 +506,7 @@ def _ts_extract_rust_let(
             target_id=let_id.value,
             source_kind="function",
             target_kind="variable",
-            source_name=function_id.value,
+            source_name=_node_name(graph, function_id),
             target_name=let_name,
             flow_type="assignment",
             source_text=source_text[node.start_point[0]:node.end_point[0] + 1].strip(),
@@ -567,7 +573,7 @@ def _ts_extract_rust_return(
             target_id=return_id.value,
             source_kind="function",
             target_kind="return_value",
-            source_name=function_id.value,
+            source_name=_node_name(graph, function_id),
             target_name="return_value",
             flow_type="return_flow",
             source_text=source_text[node.start_point[0]:node.end_point[0] + 1].strip(),
@@ -672,7 +678,7 @@ def _ts_extract_ts(
         return []
 
     edges: list[DataFlowEdge] = []
-    lang = tstypescript.language_typescript()
+    lang = ts.Language(tstypescript.language_typescript())
     parser = ts.Parser(lang)
     tree = parser.parse(source_text.encode())
 
@@ -745,7 +751,7 @@ def _ts_extract_ts_let(
             target_id=var_id.value,
             source_kind="function",
             target_kind="variable",
-            source_name=function_id.value,
+            source_name=_node_name(graph, function_id),
             target_name=var_name,
             flow_type="assignment",
             source_text=source_text[node.start_point[0]:node.end_point[0] + 1].strip(),
@@ -796,7 +802,7 @@ def _ts_extract_ts_expression(
                         target_id=var_id.value,
                         source_kind="function",
                         target_kind="variable",
-                        source_name=function_id.value,
+                        source_name=_node_name(graph, function_id),
                         target_name=var_name,
                         flow_type="assignment",
                         source_text=source_text[node.start_point[0]:node.end_point[0] + 1].strip(),
@@ -871,7 +877,7 @@ def _ts_extract_ts_return(
             target_id=return_id.value,
             source_kind="function",
             target_kind="return_value",
-            source_name=function_id.value,
+            source_name=_node_name(graph, function_id),
             target_name="return_value",
             flow_type="return_flow",
             source_text=source_text[node.start_point[0]:node.end_point[0] + 1].strip(),
@@ -937,7 +943,7 @@ def _ts_extract_java(
         return []
 
     edges: list[DataFlowEdge] = []
-    lang = tsjava.language()
+    lang = ts.Language(tsjava.language())
     parser = ts.Parser(lang)
     tree = parser.parse(source_text.encode())
 
@@ -1006,7 +1012,7 @@ def _ts_extract_java_var(
             target_id=var_id.value,
             source_kind="function",
             target_kind="variable",
-            source_name=function_id.value,
+            source_name=_node_name(graph, function_id),
             target_name=var_name,
             flow_type="assignment",
             source_text=source_text[node.start_point[0]:node.end_point[0] + 1].strip(),
@@ -1055,7 +1061,7 @@ def _ts_extract_java_return(
             target_id=return_id.value,
             source_kind="function",
             target_kind="return_value",
-            source_name=function_id.value,
+            source_name=_node_name(graph, function_id),
             target_name="return_value",
             flow_type="return_flow",
             source_text=source_text[node.start_point[0]:node.end_point[0] + 1].strip(),
@@ -1122,7 +1128,7 @@ def extract_assignments(
                 target_id=var_id.value,
                 source_kind="function",
                 target_kind="variable",
-                source_name=function_id.value,
+                source_name=_node_name(graph, function_id),
                 target_name=var_name,
                 flow_type="assignment",
                 source_text=trimmed,
@@ -1186,7 +1192,7 @@ def extract_return_flow(
                 target_id=return_id.value,
                 source_kind="function",
                 target_kind="return_value",
-                source_name=function_id.value,
+                source_name=_node_name(graph, function_id),
                 target_name="return_value",
                 flow_type="return_flow",
                 source_text=trimmed,
@@ -1247,7 +1253,7 @@ def extract_field_assignments(
                             target_id=field_id.value,
                             source_kind="function",
                             target_kind="field",
-                            source_name=function_id.value,
+                            source_name=_node_name(graph, function_id),
                             target_name=f"self.{field_name}",
                             flow_type="field_flow",
                             source_text=trimmed,

@@ -151,7 +151,9 @@ def _add_node(
         for k, v in props.items():
             node = node.with_property(k, v)
     graph.add_node(node)
-    return graph.find_by_qname(qn)
+    result = graph.find_by_qname(qn)
+    assert result is not None, f"Node not found after add: {qn}"
+    return result
 
 
 def _emit_calls(

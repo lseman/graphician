@@ -16,8 +16,9 @@ from typing import Any
 
 from ...core.graph import Graph
 
-# Type alias: extractor function
-Extractor = Callable[[str, Graph], dict[str, Any]]
+# Type alias: extractor function. markdown/html extractors mutate the graph
+# in place and return None; svg's returns a summary dict.
+Extractor = Callable[[str, Graph], dict[str, Any] | None]
 
 # Supported extensions
 SUPPORTED_EXTENSIONS: set[str] = {"md", "markdown", "html", "htm", "svg"}
@@ -60,7 +61,8 @@ def extract_concept(path: str | Path, graph: Graph) -> dict[str, Any]:
     extractor = get_by_path(path)
     if extractor is None:
         return {"error": f"Unsupported concept format: {path.name}"}
-    return extractor(str(path), graph)
+    result = extractor(str(path), graph)
+    return result if result is not None else {}
 
 
 def resolve_all_mentions(graph: Graph) -> int:

@@ -169,7 +169,7 @@ def _refinement_local_move_csr(
     min_gain: float,
     rng_seed: int,
     total_weight: np.float64,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     """Local-move with node_mass tracking (used in Leiden/Infomap refinement).
 
     Like _local_move_csr but tracks comm_size for well-connectedness checks.

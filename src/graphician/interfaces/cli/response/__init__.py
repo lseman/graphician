@@ -74,9 +74,6 @@ class DetailLevel:
     def parse(cls, value: str) -> str:
         return cls._MAP.get(value, "standard")
 
-    def __str__(self) -> str:
-        return self
-
     @classmethod
     def from_params(cls, params: dict[str, Any]) -> str:
         return cls.parse(params.get("detail_level", "standard"))
@@ -108,7 +105,7 @@ def _base_param(params: dict[str, Any]) -> str:
 # Cache (process-lifetime)
 # -----------------------------------------------------------------------
 
-_cache_data: dict[str, tuple[int, Graph]] = {}
+_cache_data: dict[str, tuple[float, Graph]] = {}
 _cache_lock: Any = None
 
 try:
@@ -212,7 +209,7 @@ def _apply_guardrails(
     if include_summary and "graph_summary" not in value:
         value["graph_summary"] = _graph_summary_json(graph)
 
-    guardrails = {
+    guardrails: dict[str, Any] = {
         "response_limit": limit,
         "offset": offset,
         "hard_limit": HARD_LIMIT,
@@ -581,7 +578,7 @@ def _call_neighbors(
     if node_id is None:
         return {"operation": operation, result_key: [], "error": f"target not found: {target}"}
     iterator = graph.in_neighbors(node_id) if incoming else graph.out_neighbors(node_id)
-    hits = []
+    hits: list[dict[str, str | None]] = []
     for neighbor_id, edge in iterator:
         if edge.kind is not EdgeKind.CALLS:
             continue
@@ -593,7 +590,7 @@ def _call_neighbors(
                 "source_uri": node.source_uri,
                 "edge_kind": edge.kind.value,
             })
-    hits.sort(key=lambda item: item["qualified_name"])
+    hits.sort(key=lambda item: item["qualified_name"] or "")
     hits = hits[: _limit_param(params, 50)]
     return {"operation": operation, result_key: hits, "total": len(hits)}
 

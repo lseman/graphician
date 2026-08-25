@@ -27,7 +27,7 @@ from ...analysis.communities import (
     find_hub_nodes,
 )
 from ...analysis.context_pack import build_context_pack
-from ...analysis.dedup import DedupResult, deduplicate_nodes
+from ...analysis.dedup import deduplicate_nodes
 from ...analysis.diff import graph_diff
 from ...analysis.impact import compute_impact
 from ...analysis.patterns import detect_patterns
@@ -661,7 +661,7 @@ class GraphicianMCP:
                         remaining.remove(node_id)
                         removed = True
             k += 1
-        ranked = []
+        ranked: list[dict[str, Any]] = []
         for node_id, core in coreness.items():
             node = graph.node(NodeId(node_id))
             if node:
@@ -783,13 +783,13 @@ class GraphicianMCP:
 
     def _op_dedup(self, graph: Graph) -> dict[str, Any]:
         """Deduplicate nodes using MinHash/LSH pipeline."""
-        result: DedupResult = deduplicate_nodes(graph)
+        result = deduplicate_nodes(graph)
         return {
             "dedup": {
-                "candidates_examined": result.candidates_examined,
-                "merges": result.merges,
-                "nodes_removed": result.nodes_removed,
-                "edges_rewired": result.edges_rewired,
+                "candidates_examined": result["candidates_examined"],
+                "merges": result["merges"],
+                "nodes_removed": result["nodes_removed"],
+                "edges_rewired": result["edges_rewired"],
             }
         }
 
@@ -902,7 +902,7 @@ class GraphicianMCP:
             "mcp_targeted": graph_tokens * 0.3,
             "minimal_context": graph_tokens * 0.1,
         }
-        benchmark = []
+        benchmark: list[dict[str, Any]] = []
         for name, cost in strategies.items():
             benchmark.append({
                 "strategy": name,

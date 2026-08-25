@@ -49,7 +49,9 @@ def _add_node(
         for k, v in props.items():
             node = node.with_property(k, v)
     graph.add_node(node)
-    return graph.find_by_qname(qn)
+    result = graph.find_by_qname(qn)
+    assert result is not None, f"Node not found after add: {qn}"
+    return result
 
 
 def _parse_properties(props_str: str) -> dict[str, Any]:
@@ -331,7 +333,8 @@ def extract_data_flow(
         from graphician.extraction.data_flow import (
             extract_data_flow as _python_extract,
         )
-        return _python_extract(graph, function_id, source_text, params, source_path=source_path)
+        edges = _python_extract(graph, function_id, source_text, params, source_path=source_path)
+        return len(edges)
 
     # Call the Rust data flow extraction
     result = _rust_extract_data_flow(

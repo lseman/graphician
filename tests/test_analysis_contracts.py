@@ -12,7 +12,11 @@ from graphician.analysis.counterfactual import run_without_edges
 from graphician.analysis.dedup import deduplicate_nodes
 from graphician.analysis.dedup.lsh import LshIndex, lsh_candidate_pairs
 from graphician.analysis.dedup.minhash import MinHash, shingle
-from graphician.analysis.dedup.normalize import normalize_label, passes_entropy_gate, shannon_entropy
+from graphician.analysis.dedup.normalize import (
+    normalize_label,
+    passes_entropy_gate,
+    shannon_entropy,
+)
 from graphician.analysis.dedup.similarity import jaro_winkler
 from graphician.analysis.dedup.types import DedupOptions
 from graphician.analysis.dedup.union_find import UnionFind
@@ -75,7 +79,7 @@ def test_dedup_primitives_and_pipeline_group_near_duplicate_labels() -> None:
     signature = MinHash.from_iter(["abc", "bcd"], 8)
     assert signature.jaccard(signature) == 1.0
     index = LshIndex(2, 4)
-    graph, ids = _graph()
+    _graph_obj, ids = _graph()
     index.add(signature, ids[0])
     assert ids[0] in index.get_candidates(signature)
 

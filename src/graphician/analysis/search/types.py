@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
 
-from ...core.graph import Graph
 from ...core.id import NodeId
-from ...core.node import Node, NodeKind
+from ...core.node import Node
 
 
 class SearchIntent(Enum):
@@ -22,7 +20,7 @@ class SearchIntent(Enum):
     DOCUMENTATION = "documentation"
 
     @classmethod
-    def classify(cls, query: str) -> "SearchIntent":
+    def classify(cls, query: str) -> SearchIntent:
         """Classify a query string into an intent."""
         q = query.lower()
         if any(term in q for term in (

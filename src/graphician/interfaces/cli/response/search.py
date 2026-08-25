@@ -5,11 +5,8 @@ Mirrors the Rust ``search.rs`` module.
 
 from __future__ import annotations
 
-import math
 import re
 from typing import Any
-
-from ....core.node import NodeKind
 
 
 def handle_search(graph, params: dict[str, Any]) -> dict[str, Any]:

@@ -9,19 +9,20 @@ from __future__ import annotations
 
 import heapq
 from collections import defaultdict
-from dataclasses import dataclass, field
-from typing import Any, Iterator
+from dataclasses import dataclass
+from typing import Any
 
 import networkx as nx
 import numpy as np
 
-from ..core.edge import Edge, EdgeKind
+from ..core.edge import EdgeKind
 from ..core.graph import Graph
 from ..core.id import NodeId
-from ..core.node import Node, NodeKind
-from .adjacency import build_adjacency_matrix
+from ..core.node import NodeKind
+from .export import export_graphml  # noqa: F401 -- re-exported for `graphician.analysis`
 from .numba_graph_algs import has_numba as has_numba_algs
-from .export import export_graphml
+from .refactoring.engine import find_dead_code as _refactor_find_dead_code
+from .refactoring.engine import rename_preview as _refactor_rename_preview
 
 
 @dataclass
@@ -170,7 +171,6 @@ def core_numbers(graph: Graph) -> dict[NodeId, int]:
     row_ptr = np.zeros(n + 1, dtype=np.intp)
     col_idx = np.zeros(nnz, dtype=np.intp)
 
-    pos = 0
     for i in range(n):
         row_ptr[i + 1] = row_ptr[i] + len(adj_map.get(i, set()))
 
@@ -347,7 +347,7 @@ def bridge_scores(
 
 def _articulation_points(graph: Graph) -> list[int]:
     """Internal: articulation points on undirected view (returns node IDs).
-    
+
     Uses numba-accelerated iterative algorithm when available.
     """
     from .native import native_graph
@@ -453,9 +453,7 @@ def _articulation_points(graph: Graph) -> list[int]:
                     # Check articulation point condition
                     if low[node] >= discovery[parent]:
                         child_count[parent] = child_count.get(parent, 0) + 1
-                        if parent != nid_val and child_count[parent] > 1:
-                            points.add(parent)
-                        elif parent == nid_val and child_count[parent] > 1:
+                        if (parent != nid_val and child_count[parent] > 1) or (parent == nid_val and child_count[parent] > 1):
                             points.add(parent)
 
     return list(points)
@@ -561,7 +559,7 @@ def find_large_functions(
 ) -> dict[str, Any]:
     """Find functions exceeding a line threshold."""
     large: list[dict[str, Any]] = []
-    for nid, node in graph.nodes():
+    for _nid, node in graph.nodes():
         if node.kind in (NodeKind.FUNCTION, NodeKind.METHOD):
             lines = node.properties.get("line_count", 0)
             if isinstance(lines, (int, float)) and lines >= min_lines:
@@ -792,7 +790,7 @@ def compute_surprise_scoring(
                 if nid:
                     communities.setdefault(comm["id"], set()).add(nid.value)
 
-    nx_graph = _to_nx(graph)
+    _to_nx(graph)
     surprises: list[dict[str, Any]] = []
 
     for _, src, dst, edge in graph.edges():
@@ -826,14 +824,6 @@ def _find_community(node_id: int, communities: dict[int, set[int]]) -> int:
     return -1
 
 
-# Refactoring functions moved to refactoring/engine.py
-from .refactoring.engine import rename_preview as _refactor_rename_preview
-from .refactoring.engine import find_dead_code as _refactor_find_dead_code
-from .refactoring.types import RenameEdit
-from .refactoring.types import RenamePreview as _RenamePreview
-from .refactoring.types import RenameStats as _RenameStats
-
-
 def rename_preview(graph: Graph, qname: str, new_name: str) -> dict[str, Any] | None:
     """Preview rename of a symbol without modifying the graph.
 
@@ -865,7 +855,7 @@ def call_resolution_stats(graph: Graph) -> dict[str, Any]:
     """
     resolved = 0
     unresolved = 0
-    for _, src, dst, edge in graph.edges():
+    for _, _src, dst, edge in graph.edges():
         if edge.kind != EdgeKind.CALLS:
             continue
         dst_node = graph.node(dst)

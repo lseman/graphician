@@ -7,9 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from ...core.edge import EdgeKind
 from ...core.graph import Graph
-from ...core.id import NodeId
 from ...core.node import NodeKind
 from .types import Change
 
@@ -54,10 +52,7 @@ def _parse_diff(diff_text: str) -> list[DiffHunk]:
             if match:
                 old = match.group(1)
                 new = match.group(2)
-                if old == new:
-                    current_file = old
-                else:
-                    current_file = new
+                current_file = old if old == new else new
 
         elif line.startswith("@@"):
             # Parse hunk header
@@ -91,11 +86,15 @@ def _find_affected_symbols(graph: Graph, hunk: DiffHunk) -> list:
     affected = []
 
     # Look for function/class definitions in the changed region
-    for nid, node in graph.nodes():
-        if node.source_uri == hunk.file_path:
-            if node.line_start and node.line_end:
-                if node.line_start <= hunk.line_end and node.line_end >= hunk.line_start:
-                    affected.append(node)
+    for _nid, node in graph.nodes():
+        if (
+            node.source_uri == hunk.file_path
+            and node.line_start
+            and node.line_end
+            and node.line_start <= hunk.line_end
+            and node.line_end >= hunk.line_start
+        ):
+            affected.append(node)
 
     return affected
 

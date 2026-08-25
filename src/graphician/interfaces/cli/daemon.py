@@ -16,7 +16,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Config paths
-_DAEMON_CONFIG_DIR = Path.home() / ".ariadne"
+_DAEMON_CONFIG_DIR = Path.home() / ".graphician"
 _DAEMON_REPOS_FILE = _DAEMON_CONFIG_DIR / "repos.json"
 
 

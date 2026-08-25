@@ -18,59 +18,60 @@ from __future__ import annotations
 from .core import (
     CommunityOptions,
     WorkingGraph,
-    edge_kind_weight,
     aggregate,
     densify,
+    edge_kind_weight,
     enforce_connected,
+)
+from .gaps import knowledge_gaps
+from .leiden import (
+    leiden,
+    leiden_with_options,
 )
 from .louvain import (
     detect_communities,
     louvain,
     louvain_with_options,
 )
-from .leiden import (
-    leiden,
-    leiden_with_options,
-)
 from .nodes import (
-    find_bridge_nodes,
-    find_hub_nodes,
-    find_god_nodes,
     compute_centrality,
+    find_bridge_nodes,
+    find_god_nodes,
+    find_hub_nodes,
     is_rank_noise,
 )
 from .quality import (
+    LOW_COHESION_THRESHOLD,
     CommunityQuality,
     community_cohesion,
     community_quality,
-    LOW_COHESION_THRESHOLD,
 )
-from .gaps import knowledge_gaps
 from .split import split_oversized
 from .utils import _find_community, _to_networkx
 
 __all__ = [
-    "detect_communities",
-    "louvain",
-    "louvain_with_options",
-    "leiden",
-    "leiden_with_options",
-    "find_bridge_nodes",
-    "find_hub_nodes",
-    "find_god_nodes",
-    "compute_centrality",
-    "is_rank_noise",
-    "CommunityOptions",
-    "WorkingGraph",
-    "community_cohesion",
-    "community_quality",
-    "CommunityQuality",
     "LOW_COHESION_THRESHOLD",
-    "knowledge_gaps",
-    "split_oversized",
+    "CommunityOptions",
+    "CommunityQuality",
+    "WorkingGraph",
     "_find_community",
     "_to_networkx",
     "aggregate",
+    "community_cohesion",
+    "community_quality",
+    "compute_centrality",
     "densify",
+    "detect_communities",
+    "edge_kind_weight",
     "enforce_connected",
+    "find_bridge_nodes",
+    "find_god_nodes",
+    "find_hub_nodes",
+    "is_rank_noise",
+    "knowledge_gaps",
+    "leiden",
+    "leiden_with_options",
+    "louvain",
+    "louvain_with_options",
+    "split_oversized",
 ]

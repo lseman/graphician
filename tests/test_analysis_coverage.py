@@ -2,15 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
-
 from graphician.core.edge import Edge, EdgeKind
 from graphician.core.graph import Graph
-from graphician.core.id import NodeId
 from graphician.core.node import Node, NodeKind
-
 
 # ── community quality ────────────────────────────────────────────────
 
@@ -157,8 +151,8 @@ class TestSplitOversized:
         from graphician.analysis.communities.split import split_oversized
 
         graph = Graph()
-        n1 = graph.add_node(Node.new(NodeKind.FUNCTION, "app::a"))
-        n2 = graph.add_node(Node.new(NodeKind.FUNCTION, "app::b"))
+        graph.add_node(Node.new(NodeKind.FUNCTION, "app::a"))
+        graph.add_node(Node.new(NodeKind.FUNCTION, "app::b"))
         result = split_oversized(graph)
         assert result["operation"] == "split_oversized"
         assert result["final_count"] >= 0
@@ -207,7 +201,7 @@ class TestContextPack:
         from graphician.analysis.context_pack import build_context_pack
 
         graph = Graph()
-        n1 = graph.add_node(Node.new(NodeKind.FUNCTION, "app::search"))
+        graph.add_node(Node.new(NodeKind.FUNCTION, "app::search"))
         result = build_context_pack(graph, "search", token_budget=1)
         assert "context_pack" in result
 
@@ -373,10 +367,10 @@ class TestGraphDiff:
         from graphician.analysis.diff import graph_diff
 
         base = Graph()
-        b = base.add_node(Node.new(NodeKind.FUNCTION, "app::foo").with_source("/tmp/app.py", 1, 1))
+        base.add_node(Node.new(NodeKind.FUNCTION, "app::foo").with_source("/tmp/app.py", 1, 1))
 
         head = Graph()
-        h = head.add_node(Node.new(NodeKind.FUNCTION, "app::foo").with_source("/tmp/app.py", 5, 10))
+        head.add_node(Node.new(NodeKind.FUNCTION, "app::foo").with_source("/tmp/app.py", 5, 10))
 
         result = graph_diff(base, head)
         assert len(result["modified_nodes"]) == 1
@@ -398,8 +392,8 @@ class TestGraphDiff:
         from graphician.analysis.diff import graph_diff
 
         base = Graph()
-        b1 = base.add_node(Node.new(NodeKind.FUNCTION, "app::a"))
-        b2 = base.add_node(Node.new(NodeKind.FUNCTION, "app::b"))
+        base.add_node(Node.new(NodeKind.FUNCTION, "app::a"))
+        base.add_node(Node.new(NodeKind.FUNCTION, "app::b"))
 
         head = Graph()
         h1 = head.add_node(Node.new(NodeKind.FUNCTION, "app::a"))

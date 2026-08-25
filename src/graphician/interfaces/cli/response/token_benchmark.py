@@ -177,7 +177,7 @@ def _check_embeddings(db_path: str) -> bool:
             return stats is not None and len(stats) > 0
         finally:
             store.close()
-    except Exception:
+    except Exception:  # noqa: BLE001 -- store backend raises implementation-specific errors
         return False
 
 
@@ -196,7 +196,7 @@ def _search_hits(graph, question: str) -> list[dict[str, Any]]:
 
         result = hybrid_search(graph, question, limit=50)
         return result.get("results", [])
-    except Exception:
+    except Exception:  # noqa: BLE001 -- hybrid search raises backend-specific errors
         # Fallback: simple fuzzy match
         return _fuzzy_search(graph, question)
 

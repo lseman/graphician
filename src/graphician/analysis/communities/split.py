@@ -5,14 +5,10 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-import networkx as nx
-
 from ...core.graph import Graph
 from ...core.id import NodeId
-from ...core.node import Node, NodeKind
-from ...core.edge import Edge, EdgeKind
-from .leiden import leiden_with_options
 from .core import CommunityOptions
+from .leiden import leiden_with_options
 
 
 def split_oversized(
@@ -103,8 +99,7 @@ def _build_subgraph(graph: Graph, member_ids: list[NodeId]) -> Graph:
     # Add edges between members
     for nid in member_ids:
         for dst, edge in graph.out_neighbors(nid):
-            if dst.value in member_set:
-                if nid in node_map and dst in node_map:
-                    sub_graph.add_edge(node_map[nid], node_map[dst], edge)
+            if dst.value in member_set and nid in node_map and dst in node_map:
+                sub_graph.add_edge(node_map[nid], node_map[dst], edge)
 
     return sub_graph

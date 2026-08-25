@@ -7,7 +7,6 @@ from typing import Any
 
 from ...core.edge import EdgeKind
 from ...core.graph import Graph
-from ...core.id import NodeId
 from ...core.node import NodeKind
 from .louvain import detect_communities
 
@@ -94,7 +93,7 @@ def knowledge_gaps(graph: Graph) -> dict[str, Any]:
             single_file.append({
                 "community_id": cid,
                 "size": size,
-                "file": list(files)[0] if files else None,
+                "file": next(iter(files)) if files else None,
             })
 
     total_gaps = len(isolated) + len(thin) + len(untested) + len(single_file)

@@ -24,15 +24,14 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Any
 
 import numpy as np
 
-from ..core.edge import Confidence, EdgeKind
+from ..core.edge import EdgeKind
 from ..core.graph import Graph
 from ..core.id import NodeId
 from ..core.node import NodeKind
-from .adjacency import AdjacencyConfig, build_adjacency_matrix
+from .adjacency import AdjacencyConfig
 
 
 @dataclass
@@ -173,7 +172,7 @@ def find_paths(graph: Graph, q: PathQuery) -> list[list[NodeId]]:
                 continue
             if edge.confidence.score() < q.min_confidence:
                 continue
-            queue.append(path + [neighbor])
+            queue.append([*path, neighbor])
 
     return results
 
@@ -194,7 +193,7 @@ def find_top_paths(
     import heapq
 
     class _Candidate:
-        __slots__ = ("nodes", "cost")
+        __slots__ = ("cost", "nodes")
 
         def __init__(self, nodes: list[NodeId], cost: float) -> None:
             self.nodes = nodes
@@ -253,7 +252,7 @@ def find_top_paths(
             if edge.confidence.score() < q.min_confidence:
                 continue
             new_cost = cand.cost + _path_edge_cost(edge.kind, edge.confidence.score())
-            heapq.heappush(heap, _Candidate(cand.nodes + [neighbor], new_cost))
+            heapq.heappush(heap, _Candidate([*cand.nodes, neighbor], new_cost))
 
     # Sort and limit
     chosen.sort(key=lambda p: p.cost)
@@ -349,25 +348,25 @@ def _traverse(
     max_hops: int,
 ) -> list[NodeId]:
     """BFS following edges of a specific kind.
-    
+
     Uses optimized array-based BFS when possible.
     """
     # Build filtered adjacency for the specific edge kind
-    config = AdjacencyConfig(
+    AdjacencyConfig(
         min_confidence=0.0,
         exclude_ambiguous=False,
     )
-    
+
     # Collect filtered edges
     edge_set: set[tuple[int, int]] = set()
     for _, src, dst, edge in graph.edges():
         if edge.kind == edge_kind and edge.confidence.score() >= 0.0:
             edge_set.add((src.value, dst.value))
-    
+
     all_nodes: list[int] = [nid.value for nid, _ in graph.nodes()]
     n = len(all_nodes)
     node_to_idx: dict[int, int] = {v: i for i, v in enumerate(all_nodes)}
-    
+
     # Build adjacency map
     adj_map: dict[int, set[int]] = defaultdict(set)
     for u, v in edge_set:
@@ -375,35 +374,35 @@ def _traverse(
         v_idx = node_to_idx.get(v)
         if u_idx is not None and v_idx is not None:
             adj_map[u_idx].add(v_idx)
-    
+
     # Convert start node to index
     start_idx = node_to_idx.get(start.value)
     if start_idx is None:
         return []
-    
+
     # Optimized BFS using numpy arrays
     visited = np.zeros(n, dtype=np.bool_)
     visited[start_idx] = True
-    
+
     # BFS queue as numpy arrays for speed
     queue = np.zeros((max_hops + 1, n), dtype=np.intp)  # [depth][node]
     queue_counts = np.zeros(max_hops + 1, dtype=np.intp)
     queue_counts[0] = 1
     queue[0, 0] = start_idx
-    
+
     results: list[NodeId] = []
-    
+
     for depth in range(max_hops + 1):
         count = queue_counts[depth]
         if count == 0:
             break
-        
+
         for i in range(count):
             node = queue[depth, i]
-            
+
             # Get neighbors
             neighbors = sorted(adj_map.get(node, set()))
-            
+
             for neighbor in neighbors:
                 if not visited[neighbor]:
                     visited[neighbor] = True
@@ -411,7 +410,7 @@ def _traverse(
                     if depth + 1 <= max_hops:
                         queue[depth + 1, queue_counts[depth + 1]] = neighbor
                         queue_counts[depth + 1] += 1
-    
+
     return results
 
 
@@ -425,14 +424,14 @@ def _bfs_optimized(
     filter_confidence: float = 0.0,
 ) -> list[NodeId]:
     """Optimized BFS traversal using numpy arrays.
-    
+
     Args:
         graph: The code graph.
         start: Starting node.
         edge_kind: Filter by edge kind (None for all edges).
         max_hops: Maximum depth to traverse.
         filter_confidence: Minimum edge confidence.
-    
+
     Returns:
         List of visited node IDs.
     """
@@ -444,11 +443,11 @@ def _bfs_optimized(
         if edge_kind is not None and edge.kind != edge_kind:
             continue
         edge_set.add((src.value, dst.value))
-    
+
     all_nodes: list[int] = [nid.value for nid, _ in graph.nodes()]
     n = len(all_nodes)
     node_to_idx: dict[int, int] = {v: i for i, v in enumerate(all_nodes)}
-    
+
     # Build adjacency map
     adj_map: dict[int, list[int]] = defaultdict(list)
     for u, v in edge_set:
@@ -456,35 +455,35 @@ def _bfs_optimized(
         v_idx = node_to_idx.get(v)
         if u_idx is not None and v_idx is not None:
             adj_map[u_idx].append(v_idx)
-    
+
     # Convert start node to index
     start_idx = node_to_idx.get(start.value)
     if start_idx is None:
         return []
-    
+
     # Optimized BFS using numpy arrays
     visited = np.zeros(n, dtype=np.bool_)
     visited[start_idx] = True
-    
+
     # BFS queue as numpy arrays for speed
     queue = np.zeros((max_hops + 1, n), dtype=np.intp)
     queue_counts = np.zeros(max_hops + 1, dtype=np.intp)
     queue_counts[0] = 1
     queue[0, 0] = start_idx
-    
+
     results: list[NodeId] = []
-    
+
     for depth in range(max_hops + 1):
         count = queue_counts[depth]
         if count == 0:
             break
-        
+
         for i in range(count):
             node = queue[depth, i]
-            
+
             # Get neighbors
             neighbors = adj_map.get(node, [])
-            
+
             for neighbor in neighbors:
                 if not visited[neighbor]:
                     visited[neighbor] = True
@@ -492,5 +491,5 @@ def _bfs_optimized(
                     if depth + 1 <= max_hops:
                         queue[depth + 1, queue_counts[depth + 1]] = neighbor
                         queue_counts[depth + 1] += 1
-    
+
     return results

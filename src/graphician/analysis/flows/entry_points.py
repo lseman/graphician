@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ...core.node import Node, NodeKind
+from ...core.node import Node
 
 
 def _is_python_framework_entry(node: Node) -> bool:
@@ -83,8 +83,7 @@ def _is_js_ts_framework_entry(node: Node) -> bool:
             "@express", "@route", "app.", "router.",
             # MobX
             "@action", "@action.bound", "@computed",
-            "@observable", "@observer",
-            # Vue
+            "@observable", # Vue
             "@definecomponent", "@vue/component", "@prop",
             "@emit", "@model",
             # Test decorators
@@ -144,9 +143,7 @@ def _is_generic_event_entry(node: Node) -> bool:
         return True
     if name.startswith("emit_") and len(name) > 5:
         return True
-    if name.startswith("trigger_") and len(name) > 8:
-        return True
-    return False
+    return bool(name.startswith("trigger_") and len(name) > 8)
 
 
 def _check_decorators(node: Node, patterns: set[str]) -> bool:

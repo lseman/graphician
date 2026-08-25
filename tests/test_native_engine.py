@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import itertools
+
 import pytest
 
 from graphician._extract import (
@@ -167,7 +169,7 @@ def test_large_flow_materialization_dispatches_native_with_python_parity(
             graph.add_node(Node.new(NodeKind.FUNCTION, f"chain_{chain}::fn_{index}"))
             for index in range(32)
         ]
-        for source, target in zip(chain_ids, chain_ids[1:], strict=False):
+        for source, target in itertools.pairwise(chain_ids):
             graph.add_edge(source, target, Edge.extracted(EdgeKind.CALLS))
 
     native_value = graph.clone()

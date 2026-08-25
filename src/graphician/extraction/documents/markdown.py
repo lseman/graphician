@@ -12,8 +12,8 @@ tables, lists, bold/italic, footnotes, blockquotes, images.
 
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 from typing import Any
 
 try:

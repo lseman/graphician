@@ -17,7 +17,6 @@ from graphician.core.graph import Graph
 from graphician.core.id import NodeId
 from graphician.core.node import Node, NodeKind
 
-
 _SUPPRESS_CALLS = frozenset(["std::panic", "std::result", "std::option", "std::vec",
     "std::vec::Vec", "std::option::Option", "std::result::Result",
     "std::boxed::Box", "std::sync", "std::rc", "std::cell",
@@ -92,9 +91,7 @@ def _should_suppress_rust_call(name: str) -> bool:
     if lower in _RUST_BUILTIN_CALLS:
         return True
     # Also check the tree-sitter / std names
-    if lower in _SUPPRESS_CALLS:
-        return True
-    return False
+    return lower in _SUPPRESS_CALLS
 
 
 def _text(node: ts.Node) -> str:
@@ -206,7 +203,7 @@ def _has_test_attr(node: ts.Node) -> bool:
     parent = node.parent
     if not parent:
         return False
-    cursor = parent.walk()
+    parent.walk()
     siblings = list(parent.children)
     try:
         idx = next(i for i, s in enumerate(siblings) if s.id == node.id)
@@ -234,9 +231,7 @@ def _attribute_marks_test(attr_node: ts.Node) -> bool:
     head = inner.split("(")[0].strip()
     if head in ("test", "rstest"):
         return True
-    if head.endswith("::test") or head == "test_case":
-        return True
-    return False
+    return bool(head.endswith("::test") or head == "test_case")
 
 
 def _find_cfg_test_mod_ranges(root: ts.Node, source: bytes) -> list[tuple[int, int]]:
@@ -256,7 +251,7 @@ def _preceding_marks_cfg_test(node: ts.Node, source: bytes) -> bool:
     parent = node.parent
     if not parent:
         return False
-    cursor = parent.walk()
+    parent.walk()
     siblings = list(parent.children)
     try:
         idx = next(i for i, s in enumerate(siblings) if s.id == node.id)
@@ -305,12 +300,7 @@ def _rust_scope(node: ts.Node) -> list[str]:
                 if c.type in ("type_identifier", "scoped_type_identifier"):
                     scope.append(_text(c))
                     break
-        elif cur.type == "mod_item":
-            for c in cur.children:
-                if c.type == "identifier":
-                    scope.append(_text(c))
-                    break
-        elif cur.type == "function_item" and cur.id != original_id:
+        elif cur.type == "mod_item" or (cur.type == "function_item" and cur.id != original_id):
             for c in cur.children:
                 if c.type == "identifier":
                     scope.append(_text(c))

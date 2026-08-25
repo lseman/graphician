@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from collections import deque
-from typing import Any
-
 from ...core.edge import Edge, EdgeKind
 from ...core.id import NodeId
 from ...core.node import Node, NodeKind
-from .types import FlowOptions
 from .entry_points import _is_framework_entry
-from .trace import _trace_flow, _compute_criticality, _is_test_node
+from .trace import _compute_criticality, _is_test_node, _trace_flow
+from .types import FlowOptions
 
 
 def compute_flows_with_options(

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
 
 from ...core.edge import EdgeKind
 from ...core.id import NodeId
-from ...core.node import Node, NodeKind
+from ...core.node import Node
 
 
 @dataclass

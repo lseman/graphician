@@ -152,9 +152,9 @@ def format_panel(raw_tokens: int, graph_tokens: int, savings_percent: float) -> 
         "\u250c" + "\u2500" * 58 + "\u2510\n"
         "\u2502" + " Token Savings".ljust(56) + "\u2502\n"
         "\u251c" + "\u2500" * 58 + "\u2524\n"
-        f"\u2502" + f" Full context would be: {raw_tokens:>12} tokens".ljust(56) + "\u2502\n"
-        f"\u2502" + f" Graph context used: {graph_tokens:>12} tokens".ljust(56) + "\u2502\n"
-        f"\u2502" + f" Saved: {saved:>12} tokens ({savings_percent:.0f}%)".ljust(56) + "\u2502\n"
+        "\u2502" + f" Full context would be: {raw_tokens:>12} tokens".ljust(56) + "\u2502\n"
+        "\u2502" + f" Graph context used: {graph_tokens:>12} tokens".ljust(56) + "\u2502\n"
+        "\u2502" + f" Saved: {saved:>12} tokens ({savings_percent:.0f}%)".ljust(56) + "\u2502\n"
         "\u2514" + "\u2500" * 58 + "\u2518"
     )
     return panel

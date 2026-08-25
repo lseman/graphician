@@ -2,13 +2,13 @@
 
 Parses HTML documents and emits:
 - ``Document`` nodes for each HTML file
-- ``Section`` nodes for semantic headings (h1–h6)
+- ``Section`` nodes for semantic headings (h1-h6)
 - ``Concept`` nodes for meaningful text (link text, heading text, table cells)
 - ``Mentions`` edges from sections/concepts to code symbols
 
 Supports:
 - Semantic HTML structure (header, nav, main, article, section, aside, footer)
-- Headings (h1–h6)
+- Headings (h1-h6)
 - Links (a) — extract symbol references from href and text
 - Code (code, pre) — extract symbol references from content
 - Tables (table, th, td) — extract cell content
@@ -23,8 +23,8 @@ Concept extraction.
 
 from __future__ import annotations
 
-from pathlib import Path
 from html.parser import HTMLParser as StdlibHTMLParser
+from pathlib import Path
 from typing import Any
 
 try:

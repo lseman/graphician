@@ -20,7 +20,6 @@ except ImportError:
 
 from ...core.edge import Edge, EdgeKind
 from ...core.graph import Graph
-from ...core.id import NodeId
 from ...core.node import Node, NodeKind
 
 logger = logging.getLogger(__name__)
@@ -51,7 +50,7 @@ def extract_file(path: str | Path) -> Graph:
     try:
         with open(path, "rb") as f:
             data = tomllib.load(f)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- malformed Cargo.toml must not crash extraction
         logger.error("Failed to parse %s: %s", path, e)
         return Graph()
 
@@ -80,7 +79,7 @@ def extract_file(path: str | Path) -> Graph:
 
     # Extract optional-dependencies
     opt_deps = data.get("optional-dependencies", {})
-    for group_name, group_deps in opt_deps.items():
+    for _group_name, group_deps in opt_deps.items():
         for dep_name, dep_spec in group_deps.items():
             _extract_dependency(
                 graph, dep_name, dep_spec, source_uri, "optional-dependency"
@@ -206,7 +205,7 @@ def _extract_dependency(
         default_features = dep_spec.get("default-features", True)
         features = dep_spec.get("features", [])
         package = dep_spec.get("package", dep_name)
-        target = dep_spec.get("target")
+        dep_spec.get("target")
 
         props: dict[str, Any] = {
             "type": dep_type,
@@ -341,7 +340,7 @@ def _extract_workspace(graph: Graph, workspace: dict[str, Any], source_uri: str)
 
     # Workspace dependencies
     workspace_deps = workspace.get("dependencies", {})
-    for dep_name, dep_spec in workspace_deps.items():
+    for dep_name, _dep_spec in workspace_deps.items():
         dep_qn = f"workspace::dep::{dep_name}"
         dep_node = Node(
             kind=NodeKind.PACKAGE,
@@ -370,7 +369,7 @@ def _extract_target(graph: Graph, target_triple: str, target_data: dict, source_
 
     # Target dependencies
     deps = target_data.get("dependencies", {})
-    for dep_name, dep_spec in deps.items():
+    for dep_name, _dep_spec in deps.items():
         dep_qn = f"target::{target_triple}::dep::{dep_name}"
         dep_node = Node(
             kind=NodeKind.PACKAGE,

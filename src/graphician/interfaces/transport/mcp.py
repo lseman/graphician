@@ -18,42 +18,40 @@ import json
 import logging
 import sys
 from collections import deque
-from pathlib import Path
 from typing import Any
 
-from ...core.graph import Graph
-from ...core.edge import EdgeKind
-from ...core.id import NodeId
-from ...core.node import NodeKind
-from ...persistence.store import GraphStore
-from ...analysis.search import hybrid_search
-from ...analysis.impact import compute_impact
-from ...analysis.paths import find_paths
+from ...analysis.changes import compute_risk, compute_test_coverage, detect_changes
 from ...analysis.communities import (
     detect_communities,
     find_bridge_nodes,
     find_hub_nodes,
-    compute_centrality,
 )
+from ...analysis.context_pack import build_context_pack
+from ...analysis.dedup import DedupResult, deduplicate_nodes
+from ...analysis.diff import graph_diff
+from ...analysis.impact import compute_impact
+from ...analysis.patterns import detect_patterns
+from ...analysis.search import hybrid_search
+from ...analysis.semsearch import EmbeddingIndex
 from ...analysis.structure import (
-    find_cycles,
+    compute_surprise_scoring,
+    export_graphml,
     find_articulation_points,
+    find_counterfactual,
+    find_cycles,
+    find_dead_code,
     find_god_nodes,
     find_large_functions,
-    find_dead_code,
-    find_counterfactual,
     find_motifs,
-    compute_surprise_scoring,
     rename_preview,
-    export_graphml,
 )
-from ...analysis.diff import graph_diff
-from ...analysis.changes import detect_changes, compute_risk, compute_test_coverage
-from ...analysis.context_pack import build_context_pack
-from ...analysis.semsearch import EmbeddingIndex
-from ...analysis.dedup import deduplicate_nodes, DedupOptions, DedupResult
-from ...analysis.patterns import detect_patterns
-from ..cli.response import tool_response, tool_response_cached
+from ...core.edge import EdgeKind
+from ...core.graph import Graph
+from ...core.id import NodeId
+from ...core.node import NodeKind
+from ...persistence.store import GraphStore
+from ..cli.response import tool_response_cached
+from ..cli.response.paths import handle_paths
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +251,6 @@ class GraphicianMCP:
 
             if operation in response_ops:
                 # Use structured response system (with hints, guardrails, caching)
-                use_cache = True  # Server mode: enable caching
                 result = tool_response_cached(self.db_path, operation, tool_params)
             else:
                 # Fallback to legacy operation handlers
@@ -308,12 +305,12 @@ class GraphicianMCP:
                 )
                 return {"target": params.get("target", ""), "blast_radius": impact}
             case "paths":
-                return find_paths(
-                    graph,
-                    params.get("source", ""),
-                    params.get("target", ""),
-                    max_hops=params.get("max_hops", 6),
-                )
+                return handle_paths(graph, {
+                    "from": params.get("source", ""),
+                    "to": params.get("target", ""),
+                    "max_hops": params.get("max_hops", 6),
+                    "limit": params.get("limit", 10),
+                })
             case "traverse":
                 return self._op_traverse(graph, params)
             case "callers_of":
@@ -575,7 +572,7 @@ class GraphicianMCP:
 
     def _op_flows(self, graph: Graph, params: dict[str, Any]) -> dict[str, Any]:
         flows = []
-        for nid, node in graph.nodes():
+        for _nid, node in graph.nodes():
             if node.kind.value == "flow":
                 flows.append({
                     "qualified_name": node.qualified_name,
@@ -627,20 +624,21 @@ class GraphicianMCP:
 
         # Functions without tests
         tested: set[str] = set()
-        for _, src, dst, edge in graph.edges():
+        for _, src, _dst, edge in graph.edges():
             if edge.kind.value == "tested_by":
                 src_node = graph.node(src)
                 if src_node:
                     tested.add(src_node.qualified_name)
 
-        for nid, node in graph.nodes():
-            if node.kind in (NodeKind.FUNCTION, NodeKind.METHOD):
-                if node.qualified_name not in tested:
-                    gaps.append({
-                        "type": "no_test",
-                        "qualified_name": node.qualified_name,
-                        "kind": node.kind.value,
-                    })
+        for _nid, node in graph.nodes():
+            if node.kind in (NodeKind.FUNCTION, NodeKind.METHOD) and (
+                node.qualified_name not in tested
+            ):
+                gaps.append({
+                    "type": "no_test",
+                    "qualified_name": node.qualified_name,
+                    "kind": node.kind.value,
+                })
 
         return {"gaps": gaps[:50], "total": len(gaps)}
 
@@ -703,7 +701,7 @@ class GraphicianMCP:
     def _op_knowledge_gaps(self, graph: Graph) -> dict[str, Any]:
         """Find undocumented or isolated code areas."""
         gaps: list[dict[str, Any]] = []
-        for nid, node in graph.nodes():
+        for _nid, node in graph.nodes():
             if node.kind in (NodeKind.FUNCTION, NodeKind.CLASS):
                 has_docs = (
                     node.source_text and

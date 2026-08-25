@@ -108,9 +108,7 @@ def _is_dropped_receiver(name: str) -> bool:
     """
     if name in ("self", "cls", "super"):
         return False
-    if name[0:1] and name[0].isupper():
-        return False
-    return True
+    return not (name[0:1] and name[0].isupper())
 
 
 def _find_enclosing_func(line: int, func_nodes: list[tuple[str, int, int]]) -> str:

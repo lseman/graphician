@@ -1,6 +1,6 @@
 """Tests for core graph types."""
 
-from graphician.core.edge import Edge, EdgeKind, Confidence
+from graphician.core.edge import Confidence, Edge, EdgeKind
 from graphician.core.graph import Graph
 from graphician.core.id import NodeId
 from graphician.core.node import Node, NodeKind
@@ -15,7 +15,7 @@ class TestNodeId:
         nid = NodeId(1)
         try:
             nid.value = 2
-            assert False, "Should be immutable"
+            raise AssertionError("Should be immutable")
         except AttributeError:
             pass
 
@@ -135,7 +135,7 @@ class TestGraph:
 
     def test_merge_deduplicates(self):
         g1 = Graph()
-        a = g1.add_node(Node.new(NodeKind.FUNCTION, "m::f"))
+        g1.add_node(Node.new(NodeKind.FUNCTION, "m::f"))
         g1.add_node(Node.new(NodeKind.FILE, "file::a.rs"))
 
         g2 = Graph()

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from ...core.node import Node, NodeKind
 from ...core.edge import EdgeKind
+from ...core.node import Node, NodeKind
 from .trace import _is_test_node
 
 
@@ -100,6 +100,4 @@ def _is_generic_event_entry(node: Node) -> bool:
         return True
     if name.startswith("emit_") and len(name) > 5:
         return True
-    if name.startswith("trigger_") and len(name) > 8:
-        return True
-    return False
+    return bool(name.startswith("trigger_") and len(name) > 8)

@@ -149,21 +149,58 @@ src/graphician/
 
 ## Graph Stats
 
-Typical output from `graphician status`:
+Output from `graphician status` on this repository:
 
 ```
-Graph stats: 10218 nodes, 25741 edges
+Graph stats: 16489 nodes, 35621 edges
 
-Call resolution
-- Resolved: 2997, Unresolved: 1764, Rate: 62.9%
+Node kinds: 12756 variable, 1326 function, 576 method, 285 module, 253 class, 226 file, 928 flow
+Edge kinds: 13482 data_flow, 10147 member_of, 6034 calls, 2110 defines, 1709 tested_by, 1112 imports
 ```
+
+## Benchmarks
+
+Native (Rust/PyO3) vs. pure-Python implementations, measured on this repository:
+
+| Operation | Python | Native | Speedup |
+|---|---:|---:|---:|
+| Full CLI build and SQLite save | 2.06 s | 1.392 s (median) | ~1.5x |
+| Type resolution (1,500 unique placeholders) | 740.081 ms | 21.538 ms | 34.4x |
+| Rust extraction (500 functions) | 41.62 ms | 9.14 ms | 4.55x |
+| Call resolution (3,000 ambiguous calls) | 37.786 ms | 18.840 ms | 2.01x |
+| Full SQLite load (5K nodes / 15K edges) | 55.197 ms | 37.424 ms | 1.48x |
+| Incremental SQLite save (1% nodes changed) | 55.438 ms | 39.119 ms | 1.42x |
+| Full SQLite save (5K nodes / 15K edges) | 60.351 ms | 49.473 ms | 1.22x |
+| Flow materialization | 0.230 s | 0.125 s | 1.84x |
+| Native snapshot access (10K nodes / 30K edges, reused) | 40.952 ms (cold) | 22.266 ms | 1.84x |
+
+Native extraction is enabled for Rust, TypeScript, JavaScript, Java, and C++, with
+automatic fallback to the Python implementation (`GRAPHICIAN_NATIVE_EXTRACTORS=0`
+forces the fallback explicitly). The installed wheel loads as `cp311-abi3` across
+supported CPython versions.
+
+### Coverage baseline
+
+| Metric | Value |
+|---|---:|
+| File extraction | 225 / 225 (100%) |
+| Definition source locations | 100% |
+| Call resolution | 96.25% |
+| Functions with callers | 29.87% |
+| Functions with callees | 80.11% |
+| Static production functions linked to tests | 20.87% |
+| Connected graph nodes | 99.94% |
+
+All six supported languages — Python, Rust, TypeScript, JavaScript, Java, and C++
+— have parity fixtures requiring complete source-location coverage and resolution
+of an unambiguous local call.
 
 ## Configuration
 
-Graphician auto-discovers `ariadne.db` in the current directory. Store file path:
+Graphician auto-discovers `graphician.db` in the current directory. Store file path:
 
 ```bash
-graphician build --db /custom/path/ariadne.db
+graphician build --db /custom/path/graphician.db
 ```
 
 ## Development
@@ -181,19 +218,6 @@ ruff check
 # Type check
 mypy graphician
 ```
-
-## Comparison: Graphician (Python) vs Ariadne (Rust)
-
-Graphician is the Python port of the original [Ariadne Rust codebase](https://github.com/earendilworks/ariadne). Feature parity is approximately 91%:
-
-| Area | Rust | Python |
-|------|------|--------|
-| Tool operations | 45 | 41 shared + 12 Python-specific |
-| Analysis parity | — | ~95% |
-| CLI parity | — | ~95% |
-| Pattern catalog | 34 | 33 |
-
-See [GAP_ANALYSIS.md](GAP_ANALYSIS.md) for a detailed comparison.
 
 ## License
 

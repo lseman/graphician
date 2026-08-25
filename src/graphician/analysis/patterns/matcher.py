@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...core.edge import EdgeKind
-from ...core.id import NodeId
-from ...core.node import NodeKind
 from .builtin import built_in_patterns
 from .types import FrameworkPattern, PatternMatch
 
@@ -74,13 +71,16 @@ def _match_pattern(graph, pattern: FrameworkPattern) -> PatternMatch | None:
     matched_edges: list[dict[str, Any]] = []
     if pattern.required_edge_kinds:
         for _, src, dst, edge in graph.edges():
-            if src.value in candidate_ids and dst.value in candidate_ids:
-                if edge.kind in pattern.required_edge_kinds:
-                    matched_edges.append({
-                        "source_id": src.value,
-                        "target_id": dst.value,
-                        "kind": edge.kind.value,
-                    })
+            if (
+                src.value in candidate_ids
+                and dst.value in candidate_ids
+                and edge.kind in pattern.required_edge_kinds
+            ):
+                matched_edges.append({
+                    "source_id": src.value,
+                    "target_id": dst.value,
+                    "kind": edge.kind.value,
+                })
         if not matched_edges and pattern.required_edge_kinds:
             return None
 

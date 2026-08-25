@@ -63,9 +63,7 @@ def _is_test_attribute(raw: str) -> bool:
     head = inner.split("(")[0].strip()
     if head in ("test", "rstest", "pytest.mark"):
         return True
-    if head.endswith("::test") or head in ("test_case", "pytest.mark"):
-        return True
-    return False
+    return bool(head.endswith("::test") or head in ("test_case", "pytest.mark"))
 
 
 def _extract_source_text(source: bytes, start_line: int, end_line: int) -> str:
@@ -164,9 +162,7 @@ def _emit_calls(
         # Don't descend into nested function/class bodies
         if child.type in suppress_kinds:
             continue
-        if child.type == "call":
-            _emit_single_call(child, source, graph, caller_id)
-        elif child.type == "call_expression":
+        if child.type == "call" or child.type == "call_expression":
             _emit_single_call(child, source, graph, caller_id)
         stack.extend(_children(child))
 
@@ -194,9 +190,7 @@ def _emit_single_call(
     name = None
     scope = None
 
-    if func_node.type == "identifier":
-        name = _text(func_node, source)
-    elif func_node.type in ("property_identifier", "field_identifier"):
+    if func_node.type == "identifier" or func_node.type in ("property_identifier", "field_identifier"):
         name = _text(func_node, source)
     elif func_node.type in ("scoped_identifier", "scoped_type_identifier"):
         text = _text(func_node, source)

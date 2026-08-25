@@ -4,11 +4,14 @@ from pathlib import Path
 
 from graphician.core import Edge, EdgeKind, Graph, Node, NodeKind
 from graphician.interfaces.cli.response.flows import handle_flows, handle_test_coverage
-from graphician.interfaces.cli.response.impact import handle_god_nodes, handle_impact, hub_nodes_json
+from graphician.interfaces.cli.response.impact import (
+    handle_god_nodes,
+    handle_impact,
+    hub_nodes_json,
+)
 from graphician.interfaces.cli.response.paths import _simple_paths, handle_paths
 from graphician.interfaces.cli.response.search import (
     _fuzzy_match,
-    _score_match,
     find_related_json,
     handle_context_pack,
     handle_search,
@@ -53,7 +56,7 @@ def test_path_response_resolves_names_and_returns_weighted_nodes(tmp_path: Path)
 
 
 def test_impact_hub_and_god_node_responses_cover_directions_and_limits(tmp_path: Path) -> None:
-    graph, main, helper, *_ = _graph(tmp_path)
+    graph, _main, _helper, *_ = _graph(tmp_path)
     out = handle_impact(graph, {"target": "app::main", "direction": "out", "max_hops": 2})
     assert out["total"] == 2
     incoming = handle_impact(graph, {"target": "app::helper", "direction": "in"})

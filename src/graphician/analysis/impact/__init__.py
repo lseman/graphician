@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from .types import ImpactQuery, ImpactHit, ImpactResult
-from .engine import find_impact, compute_impact, _impact_cost, _node_kind_boost, _compute_score
+from .engine import _compute_score, _impact_cost, _node_kind_boost, compute_impact, find_impact
+from .types import ImpactHit, ImpactQuery, ImpactResult
 
 __all__ = [
-    "ImpactQuery",
     "ImpactHit",
+    "ImpactQuery",
     "ImpactResult",
-    "find_impact",
-    "compute_impact",
+    "_compute_score",
     "_impact_cost",
     "_node_kind_boost",
-    "_compute_score",
+    "compute_impact",
+    "find_impact",
 ]

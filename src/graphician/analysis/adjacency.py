@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ..core.edge import Edge, EdgeKind, Confidence
+from ..core.edge import Confidence, Edge, EdgeKind
 from ..core.graph import Graph
 from ..core.id import NodeId
 
@@ -180,7 +180,7 @@ def build_weighted_adjacency_matrix(
 def build_scipy_adjacency(
     graph: Graph,
     config: AdjacencyConfig | None = None,
-) -> tuple["csr_array", list[NodeId], dict[NodeId, int]]:
+) -> tuple[csr_array, list[NodeId], dict[NodeId, int]]:
     """Build a scipy.sparse CSR matrix from the graph.
 
     Args:
@@ -193,14 +193,14 @@ def build_scipy_adjacency(
     Note: Requires scipy to be installed. Falls back to numpy arrays if unavailable.
     """
     try:
-        from scipy.sparse import csr_array  # noqa: F401
+        from scipy.sparse import csr_array
     except ImportError:
         # Fall back to numpy arrays
         row_ptr, col_idx, edge_weight, nodes, node_to_idx = build_adjacency_matrix(graph, config)
         import warnings
         warnings.warn(
             "scipy not available, returning numpy CSR arrays instead of csr_array",
-            UserWarning,
+            UserWarning, stacklevel=2,
         )
         # Return as tuple compatible with the function signature
         return (None, nodes, node_to_idx)  # type: ignore
@@ -228,7 +228,7 @@ def compute_out_degree_matrix(
     Returns a 1D array of degree values (one per node), ready for
     vectorized PageRank normalization.
     """
-    row_ptr, col_idx, edge_weight, nodes, node_to_idx = build_adjacency_matrix(graph, config)
+    row_ptr, _col_idx, edge_weight, nodes, _node_to_idx = build_adjacency_matrix(graph, config)
     n = len(nodes)
 
     # Vectorized degree computation
@@ -259,7 +259,7 @@ def build_transitions_matrix(
     Returns:
         Tuple of (row_ptr, col_idx, transition_prob, out_degree)
     """
-    row_ptr, col_idx, edge_weight, nodes, node_to_idx = build_adjacency_matrix(graph, config)
+    row_ptr, col_idx, edge_weight, nodes, _node_to_idx = build_adjacency_matrix(graph, config)
     n = len(nodes)
 
     # Compute out-degree per row

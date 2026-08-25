@@ -10,11 +10,11 @@ lowercased, without leading dot.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from ...core.graph import Graph
-
 
 # Type alias: extractor function
 Extractor = Callable[[str, Graph], dict[str, Any]]

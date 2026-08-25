@@ -5,10 +5,9 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-from ...core.edge import Edge, EdgeKind
 from ...core.graph import Graph
-from ...core.id import NodeId, EdgeId
-from ...core.node import Node, NodeKind
+from ...core.id import NodeId
+from ...core.node import Node
 from .lsh import lsh_candidate_pairs
 from .normalize import normalize_label, passes_entropy_gate
 from .similarity import jaro_winkler
@@ -96,12 +95,12 @@ def deduplicate_nodes(
                 nid = graph.find_by_qname(qn)
                 if nid:
                     community_map[nid.value] = comm["id"]
-    except Exception:
+    except Exception:  # noqa: BLE001 -- community boost is a best-effort enhancement
         pass
 
     # Step 1: MinHash/LSH candidate pair generation
     lsh_candidates = lsh_candidate_pairs(
-        [n for n, nid in zip(nodes, node_ids) if nid in eligible_ids],
+        [n for n, nid in zip(nodes, node_ids, strict=False) if nid in eligible_ids],
         [nid for nid in node_ids if nid in eligible_ids],
         options,
     )

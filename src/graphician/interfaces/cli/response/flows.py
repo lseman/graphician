@@ -29,7 +29,7 @@ def handle_flows(graph, params: dict[str, Any] | None = None) -> dict[str, Any]:
     limit = int(params.get("limit", 25))
 
     hits: list[dict[str, Any]] = []
-    for nid, node in graph.nodes():
+    for _nid, node in graph.nodes():
         if node.kind != NodeKind.FLOW:
             continue
         props = node.properties

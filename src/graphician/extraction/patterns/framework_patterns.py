@@ -10,22 +10,19 @@ Patterns are matched at runtime against the extracted graph.
 
 from __future__ import annotations
 
-import dataclasses
 import enum
 from dataclasses import dataclass, field
-from typing import Any
 
 from graphician.core.edge import EdgeKind
 from graphician.core.graph import Graph
 from graphician.core.id import NodeId
 from graphician.core.node import NodeKind
 
-
 # ---------------------------------------------------------------------------
 # Pattern definition
 # ---------------------------------------------------------------------------
 
-class PatternCategory(str, enum.Enum):
+class PatternCategory(enum.StrEnum):
     """Category of framework pattern."""
     DEPENDENCY_INJECTION = "dependency_injection"
     ROUTING = "routing"
@@ -709,12 +706,11 @@ def _match_single_pattern(
             edge_kinds_found.add(edge.kind)
 
     # Step 3: check required edge kinds.
-    if pattern.required_edge_kinds:
-        if not all(
-            req in edge_kinds_found
-            for req in pattern.required_edge_kinds
-        ):
-            return []
+    if pattern.required_edge_kinds and not all(
+        req in edge_kinds_found
+        for req in pattern.required_edge_kinds
+    ):
+        return []
 
     # Step 4: check import patterns via source URIs.
     if pattern.import_patterns:

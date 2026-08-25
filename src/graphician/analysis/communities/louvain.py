@@ -14,7 +14,6 @@ from typing import Any
 
 import numpy as np
 
-from ...core.edge import EdgeKind
 from ...core.graph import Graph
 from ...core.id import NodeId
 from .core import (
@@ -22,11 +21,10 @@ from .core import (
     WorkingGraph,
     aggregate,
     densify,
-    identity_labels,
     relabel,
 )
 from .numba_accel import _local_move_csr, build_csr_from_working, has_numba
-from .utils import _find_community, _to_networkx, _modularity, _find_cross_community_edges
+from .utils import _find_cross_community_edges, _modularity, _to_networkx
 
 
 def louvain(

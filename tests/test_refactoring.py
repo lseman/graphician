@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
-import pytest
-
-from graphician.core.edge import Edge, EdgeKind
-from graphician.core.graph import Graph
-from graphician.core.node import Node, NodeKind
-from graphician.analysis.refactoring.types import RenameEdit, RenamePreview, RenameStats, Confidence
 from graphician.analysis.refactoring.engine import (
-    rename_preview,
     find_dead_code,
     is_entry_point,
     is_framework_inherited,
     is_test_file,
+    rename_preview,
 )
-
+from graphician.analysis.refactoring.types import Confidence, RenameEdit, RenamePreview, RenameStats
+from graphician.core.edge import Edge, EdgeKind
+from graphician.core.graph import Graph
+from graphician.core.node import Node, NodeKind
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -116,7 +113,7 @@ class TestRenamePreview:
 
     def test_no_calls_returns_definition_only(self):
         g = Graph()
-        unused = _add_fn(g, "pkg::unused_fn", "src/lib.rs", 50)
+        _add_fn(g, "pkg::unused_fn", "src/lib.rs", 50)
 
         preview = rename_preview(g, "pkg::unused_fn", "renamed")
         assert preview is not None
@@ -213,7 +210,7 @@ class TestFindDeadCode:
         g = Graph()
         caller = _add_fn(g, "pkg::caller", "src/lib.rs", 5)
         alive = _add_fn(g, "pkg::alive", "src/lib.rs", 10)
-        dead = _add_fn(g, "pkg::dead_fn", "src/lib.rs", 50)
+        _add_fn(g, "pkg::dead_fn", "src/lib.rs", 50)
         # caller calls alive, so alive is referenced
         g.add_edge(caller, alive, Edge.extracted(EdgeKind.CALLS))
 
@@ -224,7 +221,7 @@ class TestFindDeadCode:
 
     def test_excludes_entry_points(self):
         g = Graph()
-        main_fn = _add_fn(g, "pkg::main", "src/lib.rs", 1)
+        _add_fn(g, "pkg::main", "src/lib.rs", 1)
 
         result = find_dead_code(g)
         dead_names = [d["name"] for d in result]
@@ -268,7 +265,7 @@ class TestFindDeadCode:
 
     def test_dead_code_has_full_info(self):
         g = Graph()
-        dead = _add_fn(g, "pkg::dead_fn", "src/lib.rs", 50)
+        _add_fn(g, "pkg::dead_fn", "src/lib.rs", 50)
 
         result = find_dead_code(g)
         assert len(result) == 1

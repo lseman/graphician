@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from ...core.edge import EdgeKind
-from ...core.id import NodeId
 from ...core.node import NodeKind
 
 
-class PatternCategory(str, Enum):
+class PatternCategory(StrEnum):
     """Category of framework pattern."""
     DEPENDENCY_INJECTION = "dependency_injection"
     ROUTING = "routing"

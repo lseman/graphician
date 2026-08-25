@@ -11,7 +11,6 @@ Kinds split into three families:
 from __future__ import annotations
 
 import enum
-import textwrap
 from dataclasses import dataclass, field
 from typing import Any
 

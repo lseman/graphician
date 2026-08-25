@@ -41,7 +41,7 @@ def test_diff_detection_maps_hunks_symbols_risk_and_flows() -> None:
 def test_risk_and_test_coverage_use_tested_by_source_semantics() -> None:
     graph = Graph()
     secure = graph.add_node(Node.new(NodeKind.FUNCTION, "auth::password_token_admin"))
-    helper = graph.add_node(Node.new(NodeKind.FUNCTION, "app::helper"))
+    graph.add_node(Node.new(NodeKind.FUNCTION, "app::helper"))
     test = graph.add_node(Node.new(NodeKind.FUNCTION, "tests::test_secure").with_property("is_test", True))
     graph.add_edge(secure, test, Edge.extracted(EdgeKind.TESTED_BY))
     for index in range(12):

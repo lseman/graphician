@@ -29,7 +29,7 @@ def test_bundled_registry_normalizes_extensions_and_matches_paths() -> None:
 
 
 def test_registry_loads_user_overlay_and_valid_custom_language(tmp_path: Path, monkeypatch) -> None:
-    config_dir = tmp_path / ".ariadne"
+    config_dir = tmp_path / ".graphician"
     config_dir.mkdir()
     (config_dir / "languages.toml").write_text(
         """[languages.python]

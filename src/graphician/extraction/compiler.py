@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +36,7 @@ class CompilerEnrichmentReport:
 
 
 def load_compiler_evidence(path: Path) -> CompilerEvidenceFile:
-    """Load and validate ``.ariadne/compiler-evidence.json``."""
+    """Load and validate ``.graphician/compiler-evidence.json``."""
     try:
         raw: Any = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:

@@ -22,8 +22,6 @@ from ...core.edge import EdgeKind
 from ...core.graph import Graph
 from ...core.id import NodeId
 from ...core.node import Node, NodeKind
-from .types import RiskScore, RiskFactor
-
 
 # ── Security-sensitive keywords ──────────────────────────────────────
 

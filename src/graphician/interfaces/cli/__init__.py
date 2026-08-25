@@ -18,39 +18,37 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ...core.graph import Graph
-from ...extraction.languages import LanguageRegistry
-from ...extraction.pipeline import ExtractionPipeline
-from ...persistence.store import GraphStore
-from ...analysis.search import hybrid_search
-from ...analysis.impact import compute_impact
-from ...analysis.paths import find_paths
+from ...analysis.changes import compute_risk, compute_test_coverage, detect_changes
 from ...analysis.communities import (
     detect_communities,
     find_bridge_nodes,
     find_hub_nodes,
-    compute_centrality,
 )
-from ...analysis.structure import (
-    find_cycles,
-    find_articulation_points,
-    find_god_nodes,
-    find_large_functions,
-    find_dead_code,
-    find_counterfactual,
-    find_motifs,
-    compute_surprise_scoring,
-)
-from ...analysis.changes import detect_changes, compute_risk, compute_test_coverage
-from ...analysis.context_pack import build_context_pack
 from ...analysis.coverage import graph_coverage
 from ...analysis.diff import graph_diff
+from ...analysis.impact import compute_impact
+from ...analysis.search import hybrid_search
+from ...analysis.structure import (
+    find_articulation_points,
+    find_counterfactual,
+    find_cycles,
+    find_dead_code,
+    find_god_nodes,
+    find_large_functions,
+    find_motifs,
+)
+from ...core.graph import Graph
 from ...extraction.compiler import apply_compiler_evidence, load_compiler_evidence
-from ...extraction.rust_analyzer import RustAnalyzerOptions, enrich_with_rust_analyzer
 from ...extraction.jedi import enrich_jedi_calls
+from ...extraction.languages import LanguageRegistry
+from ...extraction.pipeline import ExtractionPipeline
+from ...extraction.rust_analyzer import RustAnalyzerOptions, enrich_with_rust_analyzer
 from ...extraction.spring_di import resolve_spring_injections
-from .git import git_commit_hash, graph_freshness
 from ...persistence.embeddings import build_external_embeddings, build_local_embeddings
+from ...persistence.store import GraphStore
+from .git import git_commit_hash, graph_freshness
+from .response import _minimal_context
+from .response.paths import handle_paths
 
 logger = logging.getLogger(__name__)
 
@@ -412,7 +410,7 @@ def cmd_build(args: argparse.Namespace) -> None:
     print(f"Building graph from {root}...", file=sys.stderr)
     graph = pipeline.build(root)
 
-    evidence_path = root / ".ariadne" / "compiler-evidence.json"
+    evidence_path = root / ".graphician" / "compiler-evidence.json"
     if evidence_path.exists():
         evidence = load_compiler_evidence(evidence_path)
         report = apply_compiler_evidence(graph, evidence)
@@ -467,7 +465,7 @@ def cmd_update(args: argparse.Namespace) -> None:
 
     existing = store.load_graph()
     graph = pipeline.update(root, existing, changed, deleted)
-    evidence_path = root / ".ariadne" / "compiler-evidence.json"
+    evidence_path = root / ".graphician" / "compiler-evidence.json"
     if evidence_path.exists():
         apply_compiler_evidence(graph, load_compiler_evidence(evidence_path))
     commit = git_commit_hash(root)
@@ -565,12 +563,12 @@ def cmd_paths(args: argparse.Namespace) -> None:
     store = _load_store(args)
     graph = store.load_graph()
 
-    result = find_paths(
-        graph,
-        args.source,
-        args.target,
-        max_hops=args.max_hops,
-    )
+    result = handle_paths(graph, {
+        "from": args.source,
+        "to": args.target,
+        "max_hops": args.max_hops,
+        "limit": args.top,
+    })
 
     print(json.dumps(result, indent=2))
     store.close()
@@ -632,7 +630,7 @@ def cmd_flows(args: argparse.Namespace) -> None:
     graph = store.load_graph()
 
     flows = []
-    for nid, node in graph.nodes():
+    for _nid, node in graph.nodes():
         if node.kind.value == "flow":
             flows.append({
                 "qualified_name": node.qualified_name,

@@ -34,7 +34,7 @@ def _text(node: ts.Node) -> str:
 
 
 def _children(node: ts.Node) -> list[ts.Node]:
-    
+
     return list(node.children)
 
 
@@ -92,9 +92,7 @@ def _emit_calls(
     stack = _children(node)
     while stack:
         child = stack.pop()
-        if child.type == "call_expression":
-            _emit_call_expr(child, source, graph, caller_id)
-        elif child.type == "new_expression":
+        if child.type == "call_expression" or child.type == "new_expression":
             _emit_call_expr(child, source, graph, caller_id)
         stack.extend(_children(child))
 
@@ -114,9 +112,7 @@ def _emit_call_expr(
 
     name = None
     receiver = None
-    if func_node.type == "identifier":
-        name = _text(func_node)
-    elif func_node.type == "property_identifier":
+    if func_node.type == "identifier" or func_node.type == "property_identifier":
         name = _text(func_node)
     elif func_node.type == "member_expression":
         obj = func_node.child_by_field_name("object")
@@ -230,7 +226,7 @@ def _handle_function(
         return
 
     name = _text(name_node)
-    child_scope = scope + [name]
+    child_scope = [*scope, name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
     decorators = _extract_decorators(node, source)
@@ -266,7 +262,7 @@ def _handle_class(
         return
 
     name = _text(name_node)
-    child_scope = scope + [name]
+    child_scope = [*scope, name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
     decorators = _extract_decorators(node, source)
@@ -335,7 +331,7 @@ def _handle_method(
         return
 
     name = _text(name_node)
-    child_scope = scope + [name]
+    child_scope = [*scope, name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
     decorators = _extract_decorators(node, source)
@@ -369,7 +365,7 @@ def _handle_interface(
         return
 
     name = _text(name_node)
-    child_scope = scope + [name]
+    child_scope = [*scope, name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
     iface_id = _add_node(graph, NodeKind.TRAIT, qn, path,
@@ -408,7 +404,7 @@ def _handle_type_alias(
         return
 
     name = _text(name_node)
-    child_scope = scope + [name]
+    child_scope = [*scope, name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
     _add_node(graph, NodeKind.TYPE, qn, path,
@@ -433,7 +429,7 @@ def _handle_enum(
         return
 
     name = _text(name_node)
-    child_scope = scope + [name]
+    child_scope = [*scope, name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
     enum_id = _add_node(graph, NodeKind.TYPE, qn, path,
@@ -472,7 +468,7 @@ def _handle_lexical_decl(
             if not name_node:
                 continue
             name = _text(name_node)
-            child_scope = scope + [name]
+            child_scope = [*scope, name]
             qn = f"{file_qn}::{'::'.join(child_scope)}"
 
             if init and init.type == "arrow_function":

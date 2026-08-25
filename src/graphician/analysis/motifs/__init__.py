@@ -2,31 +2,31 @@
 
 from __future__ import annotations
 
-from .dsl import (
-    NamePattern,
-    MotifNode,
-    MotifEdge,
-    Motif,
-    MotifBuilder,
-    MotifNodeBuilder,
-)
-from .engine import MotifMatch, find_motifs
 from .builtins import (
-    security_audit_motif,
     diamond_inheritance_motif,
     doc_function_triangle,
+    security_audit_motif,
 )
+from .dsl import (
+    Motif,
+    MotifBuilder,
+    MotifEdge,
+    MotifNode,
+    MotifNodeBuilder,
+    NamePattern,
+)
+from .engine import MotifMatch, find_motifs
 
 __all__ = [
-    "NamePattern",
-    "MotifNode",
-    "MotifEdge",
     "Motif",
     "MotifBuilder",
-    "MotifNodeBuilder",
+    "MotifEdge",
     "MotifMatch",
-    "find_motifs",
-    "security_audit_motif",
+    "MotifNode",
+    "MotifNodeBuilder",
+    "NamePattern",
     "diamond_inheritance_motif",
     "doc_function_triangle",
+    "find_motifs",
+    "security_audit_motif",
 ]

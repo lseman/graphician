@@ -44,17 +44,15 @@ _RECEIVER_HINTS: dict[str, str] = {
     "process": "Process", "timer": "Timer", "counter": "Counter",
     "signal": "Signal", "bus": "Bus", "channel": "Channel",
     "queue": "Queue", "stack": "Stack", "heap": "Heap", "tree": "Tree",
-    "node": "Node", "edge": "Edge", "graph": "Graph", "matrix": "Matrix",
+    "node": "Node", "edge": "Edge", "matrix": "Matrix",
     "vector": "Vector", "scalar": "Scalar", "tensor": "Tensor",
     "layer": "Layer", "model": "Model", "dataset": "Dataset", "batch": "Batch",
-    "epoch": "Epoch", "step": "Step", "iteration": "Iteration",
-    "config": "Config", "cfg": "Config", "opts": "Options", "flags": "Flags",
+    "epoch": "Epoch", "step": "Step", "iteration": "Iteration", "flags": "Flags",
     "params": "Params", "hyperparams": "HyperParams", "args": "Args", "kwargs": "Kwargs",
     "env": "Env", "environment": "Env", "settings": "Settings",
-    "metadata": "Metadata", "options": "Options", "arguments": "Arguments",
+    "metadata": "Metadata", "arguments": "Arguments",
     "conn": "Connection", "sqlite": "Connection",
-    "rx": "Receiver", "sender": "Sender", "tx": "Sender",
-    "pool": "Pool", "client": "Client", "handle": "Handle",
+    "rx": "Receiver", "sender": "Sender", "tx": "Sender", "client": "Client",
 
     # ── Python patterns ─────────────────────────────────────────────────
 
@@ -65,12 +63,8 @@ _RECEIVER_HINTS: dict[str, str] = {
     "nodes": "list", "edges": "list", "edges_list": "list",
     "config": "dict", "settings": "dict", "options": "dict",
     "cache": "dict", "registry": "dict", "index": "dict",
-    "session": "Session", "request": "Request", "response": "Response",
-    "ctx": "Context", "context": "Context",
-    "logger": "Logger", "log": "Logger",
-    "conn": "Connection", "cursor": "Cursor", "db": "Database",
-    "client": "Client", "server": "Server", "app": "App",
-    "fs": "Path", "path": "Path", "p": "Path",
+    "logger": "Logger", "log": "Logger", "cursor": "Cursor", "db": "Database", "server": "Server", "app": "App",
+    "fs": "Path", "p": "Path",
     "filepath": "Path", "filename": "Path", "dirpath": "Path", "dirname": "Path",
     "source_path": "Path", "target_path": "Path", "output_path": "Path",
     "input_path": "Path", "data_path": "Path", "cache_path": "Path",
@@ -80,13 +74,10 @@ _RECEIVER_HINTS: dict[str, str] = {
     "records": "DataFrame", "data_frame": "DataFrame",
     "s": "Series", "ser": "Series", "col": "Series", "column": "Series",
     "idx": "Index", "index": "Index", "labels": "Index", "names": "Index",
-    "mi": "MultiIndex", "midx": "MultiIndex", "level": "MultiIndex",
-    # SQLAlchemy
-    "session": "Session", "db_session": "Session", "sess": "Session",
-    "engine": "Engine", "db_engine": "Engine", "connection": "Connection",
-    "conn": "Connection", "txn": "Transaction", "transaction": "Transaction",
+    "mi": "MultiIndex", "midx": "MultiIndex", "level": "MultiIndex", "db_session": "Session", "sess": "Session",
+    "engine": "Engine", "db_engine": "Engine", "txn": "Transaction", "transaction": "Transaction",
     "table": "Table", "tbl": "Table", "meta": "MetaData", "metadata": "MetaData",
-    "col": "Column", "field": "Column", "schema": "Table", "model": "Model",
+    "col": "Column", "field": "Column", "schema": "Table",
     "query": "Query", "q": "Query", "stmt": "Statement", "statement": "Statement",
     # Pydantic
     "model": "BaseModel", "m": "BaseModel", "obj": "BaseModel", "record": "BaseModel",
@@ -95,12 +86,8 @@ _RECEIVER_HINTS: dict[str, str] = {
     "app": "FastAPI", "api": "FastAPI", "router": "APIRouter",
     "req": "Request", "r": "Request", "res": "Response", "resp": "Response",
     # asyncio
-    "loop": "EventLoop", "event_loop": "EventLoop", "coro": "Task", "task": "Task",
-    "fut": "Future", "future": "Future", "asyncio_task": "Task", "asyncio_future": "Future",
-    # requests / HTTP
-    "resp": "Response", "response": "Response", "http_resp": "Response",
-    "sess": "Session", "http_session": "Session", "client": "Client",
-    "req": "Request", "http_req": "Request", "payload": "Request",
+    "loop": "EventLoop", "event_loop": "EventLoop", "coro": "Task",
+    "fut": "Future", "future": "Future", "asyncio_task": "Task", "asyncio_future": "Future", "http_resp": "Response", "http_session": "Session", "http_req": "Request", "payload": "Request",
     # numpy
     "arr": "ndarray", "a": "ndarray", "x": "ndarray", "y": "ndarray",
     "matrix": "ndarray", "M": "ndarray", "v": "ndarray", "w": "ndarray",
@@ -181,38 +168,6 @@ _RECEIVER_HINTS: dict[str, str] = {
     # ── NumPy patterns ──────────────────────────────────────────────────
 
     "np": "numpy", "num": "numpy",
-    "arr": "ndarray", "a": "ndarray", "x": "ndarray", "y": "ndarray",
-    "matrix": "ndarray", "M": "ndarray", "v": "ndarray", "w": "ndarray",
-    "data": "ndarray", "values": "ndarray", "tensor": "ndarray",
-    "t": "ndarray", "feature": "ndarray", "features": "ndarray",
-    "row": "ndarray", "col": "ndarray", "index": "ndarray",
-    "rng": "random", "generator": "random", "rs": "random",
-    "state": "random", "bitgen": "random",
-    "zeros": "numpy", "ones": "numpy", "empty": "numpy", "full": "numpy",
-    "array": "numpy", "arange": "numpy", "linspace": "numpy", "logspace": "numpy",
-    "eye": "numpy", "identity": "numpy", "diag": "numpy",
-    "sort": "numpy", "argsort": "numpy", "partition": "numpy",
-    "unique": "numpy", "intersect1d": "numpy", "union1d": "numpy",
-    "any": "numpy", "all": "numpy", "count_nonzero": "numpy",
-    "sum": "numpy", "mean": "numpy", "std": "numpy", "var": "numpy",
-    "min": "numpy", "max": "numpy", "argmin": "numpy", "argmax": "numpy",
-    "median": "numpy", "percentile": "numpy", "quantile": "numpy",
-    "diff": "numpy", "gradient": "numpy", "cross": "numpy",
-    "cumsum": "numpy", "cumprod": "numpy", "clip": "numpy",
-    "repeat": "numpy", "tile": "numpy", "rot90": "numpy",
-    "insert": "numpy", "delete": "numpy", "resize": "numpy",
-    "searchsorted": "numpy", "extract": "numpy", "put": "numpy",
-    "round": "numpy", "floor": "numpy", "ceil": "numpy",
-    "log": "numpy", "log10": "numpy", "log2": "numpy", "exp": "numpy",
-    "sqrt": "numpy", "power": "numpy", "multiply": "numpy",
-    "divide": "numpy", "subtract": "numpy", "add": "numpy",
-    "equal": "numpy", "not_equal": "numpy", "greater": "numpy",
-    "less": "numpy", "logical_and": "numpy", "logical_or": "numpy",
-    "where": "numpy", "select": "numpy", "copy": "numpy",
-    "zeros_like": "numpy", "ones_like": "numpy", "empty_like": "numpy",
-    "full_like": "numpy", "astype": "numpy", "reshape": "numpy",
-    "intp": "numpy", "int64": "numpy", "int32": "numpy", "float64": "numpy",
-    "float32": "numpy", "bool_": "numpy", "uint8": "numpy", "uint64": "numpy",
 
     # ── JavaScript patterns ─────────────────────────────────────────────
 
@@ -220,19 +175,14 @@ _RECEIVER_HINTS: dict[str, str] = {
     "map": "Map", "dict": "Map", "obj_map": "Map",
     "set": "Set", "unique": "Set", "distinct": "Set",
     "promise": "Promise", "prom": "Promise", "async_result": "Promise",
-    "str": "String", "text": "String", "msg": "String", "message": "String",
+    "str": "String", "msg": "String", "message": "String",
     "err": "Error", "error": "Error", "e": "Error", "exception": "Error",
     "url": "URL", "search": "URLSearchParams", "params": "URLSearchParams",
     "query": "URLSearchParams", "qs": "URLSearchParams",
     "regex": "RegExp", "re": "RegExp", "pattern": "RegExp",
     "date": "Date", "time": "Date", "timestamp": "Date",
     "buffer": "Uint8Array", "buf": "Uint8Array", "bytes": "Uint8Array",
-    "blob": "Blob", "file": "File", "form": "FormData", "fd": "FormData",
-    # ── Node.js patterns ──────────────────────────────────────────────
-    "req": "Request", "request": "Request", "http_req": "Request",
-    "res": "Response", "response": "Response", "http_resp": "Response",
-    "server": "Server", "app": "App", "express": "Application",
-    "router": "Router", "middleware": "Middleware",
+    "blob": "Blob", "file": "File", "form": "FormData", "fd": "FormData", "express": "Application",
     "fs": "fs", "path": "path", "os": "os", "http": "http",
     "https": "https", "net": "net", "url": "url", "querystring": "querystring",
     # ── lodash patterns ─────────────────────────────────────────────
@@ -249,55 +199,11 @@ _RECEIVER_HINTS: dict[str, str] = {
     # ── commander patterns ──────────────────────────────────────────
     "cmd": "Command", "command": "Command", "program": "Command", "cli": "Command",
     # ── zod patterns ────────────────────────────────────────────────
-    "schema": "ZodType", "zod": "ZodType", "spec": "ZodType",
-    # ── Pino / winston patterns ─────────────────────────────────────
-    "log": "Logger", "logger": "Logger", "pino": "Logger", "winston": "Logger",
+    "schema": "ZodType", "zod": "ZodType", "spec": "ZodType", "pino": "Logger", "winston": "Logger",
     # ── dotenv patterns ─────────────────────────────────────────────
     "env": "dotenv", "config": "dotenv", "env_config": "dotenv",
     # ── uuid patterns ───────────────────────────────────────────────
-    "uid": "uuid", "uuid": "uuid", "guid": "uuid", "id": "uuid",
-    # ── express patterns ────────────────────────────────────────────
-    "req": "Request", "request": "Request", "res": "Response",
-    "response": "Response", "next": "NextFunction", "app": "Express",
-    # ── Rust patterns (duplicate section, kept for cross-referencing) ──
-    "vec": "Vec", "v": "Vec", "vs": "Vec", "elements": "Vec", "list": "Vec",
-    "vecdeque": "VecDeque", "deque": "VecDeque", "dq": "VecDeque",
-    "hashmap": "HashMap", "map": "HashMap", "hm": "HashMap", "counts": "HashMap",
-    "btmap": "BTreeMap", "btree": "BTreeMap", "btree_map": "BTreeMap",
-    "set": "HashSet", "hs": "HashSet", "seen": "HashSet", "visited": "HashSet",
-    "string": "String", "s": "String", "text": "String", "buf": "String",
-    "builder": "String", "result": "String", "sb": "String", "msg": "String",
-    "path": "Path", "pathbuf": "PathBuf", "p": "PathBuf", "file": "Path",
-    "opt": "Option", "maybe": "Option", "val": "Option", "maybe_val": "Option",
-    "res": "Result", "ret": "Result", "output": "Result", "r": "Result",
-    "iter": "Iterator", "it": "Iterator", "chain": "Iterator",
-    "graph": "Graph", "main_graph": "Graph", "app_graph": "Graph", "g": "Graph",
-    "motif": "MotifBuilder", "mb": "MotifBuilder", "motif_builder": "MotifBuilder",
-    "store": "Store", "db": "Store", "database": "Store", "cache_store": "Store",
-    "config": "Config", "cfg": "Config", "options": "Options", "opts": "Options",
-    "ctx": "Context", "context": "Context", "cx": "Context",
-    "conn": "Connection", "sqlite": "Connection", "db_conn": "Connection",
-    "rx": "Receiver", "sender": "Sender", "tx": "Sender", "channel": "Sender",
-    "pool": "Pool", "client": "Client", "handle": "Handle", "rt": "Handle",
-    "writer": "Writer", "reader": "Reader", "builder": "Builder",
-    "factory": "Factory", "handler": "Handler", "middleware": "Middleware",
-    "router": "Router", "controller": "Controller",
-    "repository": "Repository", "service": "Service", "manager": "Manager",
-    "driver": "Driver", "executor": "Executor", "scheduler": "Scheduler",
-    "provider": "Provider", "observer": "Observer", "listener": "Listener",
-    "subscriber": "Subscriber", "cache": "Cache", "pool": "Pool",
-    "connection": "Connection", "session": "Session", "request": "Request",
-    "response": "Response", "event": "Event", "task": "Task", "job": "Job",
-    "thread": "Thread", "process": "Process", "timer": "Timer",
-    "counter": "Counter", "signal": "Signal", "bus": "Bus", "channel": "Channel",
-    "queue": "Queue", "stack": "Stack", "heap": "Heap", "tree": "Tree",
-    "node": "Node", "edge": "Edge", "matrix": "Matrix", "vector": "Vector",
-    "scalar": "Scalar", "tensor": "Tensor", "layer": "Layer", "model": "Model",
-    "dataset": "Dataset", "batch": "Batch", "epoch": "Epoch", "step": "Step",
-    "iteration": "Iteration", "flags": "Flags", "params": "Params",
-    "hyperparams": "HyperParams", "args": "Args", "kwargs": "Kwargs",
-    "env": "Env", "environment": "Env", "settings": "Settings",
-    "metadata": "Metadata", "arguments": "Arguments", "options": "Options",
+    "uid": "uuid", "uuid": "uuid", "guid": "uuid", "id": "uuid", "next": "NextFunction", "app": "Express", "list": "Vec", "dq": "VecDeque", "sb": "String", "file": "Path", "maybe_val": "Option", "r": "Result", "chain": "Iterator", "cache_store": "Store", "cx": "Context", "db_conn": "Connection", "channel": "Sender", "rt": "Handle",
 }
 
 
@@ -330,7 +236,7 @@ _METHOD_DISAMBIGUATION: dict[str, str] = {
     "__reversed__": "dict",
     "get_or_insert": "Vec",  # Rust HashMap method but also common in Vec
     "get_or_insert_with": "Vec",
-    
+
     # ── Rust-specific collection methods ─────────────────────────────────
     "or_insert": "HashMap",
     "or_insert_with": "HashMap",
@@ -387,7 +293,7 @@ _METHOD_DISAMBIGUATION: dict[str, str] = {
     "as_mut": "Box",
     "into_inner": "Box",
     "clone_from": "Box",
-    
+
     # ── C++ vector-specific methods ──────────────────────────────────────
     "push_back": "vector",
     "pop_back": "vector",
@@ -414,7 +320,7 @@ _METHOD_DISAMBIGUATION: dict[str, str] = {
     "fill": "vector",
     "emplace": "vector",
     "at": "vector",
-    
+
     # ── C++ deque-specific methods ───────────────────────────────────────
     "push_front": "deque",
     "pop_front": "deque",
@@ -424,7 +330,7 @@ _METHOD_DISAMBIGUATION: dict[str, str] = {
     "rbegin": "deque",
     "rend": "deque",
     "resize": "deque",
-    
+
     # ── C++ string-specific methods ──────────────────────────────────────
     "c_str": "string",
     "data": "string",
@@ -444,7 +350,7 @@ _METHOD_DISAMBIGUATION: dict[str, str] = {
     "replace": "string",
     "copy": "string",
     "getline": "string",
-    
+
     # ── C++ map/unordered_map methods ────────────────────────────────────
     "lower_bound": "map",
     "upper_bound": "map",
@@ -460,16 +366,16 @@ _METHOD_DISAMBIGUATION: dict[str, str] = {
     "rehash": "unordered_map",
     "bucket_count": "unordered_set",
     "bucket": "unordered_set",
-    
+
     # ── C++ set/unordered_set methods ────────────────────────────────────
     # Note: lower_bound, upper_bound, equal_range defined above for map
     "merge": "set",
     "extract": "set",
     "contains": "set",
-    
+
     # ── Common methods with cross-library ambiguity ──────────────────────
     # Prefer Python for most common cases, override where Rust/C++ dominate
-    
+
     # "get" is ambiguous: Python dict.get, Rust HashMap.get, JS Map.get
     # Python dict is most common in codebases
     "get": "dict",
@@ -479,74 +385,65 @@ _METHOD_DISAMBIGUATION: dict[str, str] = {
     "clear": "dict",
     "pop": "dict",
     "update": "dict",
-    
+
     # "find" is ambiguous: C++ string.find, Rust Iterator.find, JS Array.find
     # In Python context, Array.find is most common
     "find": "Array",
-    
+
     # "replace" is ambiguous: C++ string.replace, Python str.replace
     "replace": "str",
-    
+
     # "count" is ambiguous: C++ map/set count, Python list.count, Rust Iterator.count
     "count": "list",
-    
+
     # "size" is ambiguous: C++ container.size, Python len()
     "size": "list",
-    
+
     # "empty" is ambiguous: C++ container.empty, Python not container
     "empty": "list",
-    
-    # "begin/end" are C++ specific
-    "begin": "vector",
-    "end": "vector",
-    "rbegin": "vector",
-    "rend": "vector",
-    
-    # "at" is ambiguous: C++ at(), Python []
-    "at": "vector",
-    
+
     # "operator[]" is C++ specific
     "operator[]": "vector",
-    
+
     # "contains" is ambiguous: Python 'in', Rust HashSet.contains, C++ set.contains
     "contains": "list",
-    
+
     # "insert" is ambiguous: Python list.insert, C++ vector.insert, Rust Vec::insert
     "insert": "list",
-    
+
     # "remove" is ambiguous: Python list.remove, Rust Vec::remove, C++ container.erase
     "remove": "list",
-    
+
     # "append" is ambiguous: Python list.append, Rust Vec::append, C++ string.append
     "append": "list",
-    
+
     # "push" is ambiguous: Python list.push (rare), Rust Vec::push, JS Array.push
     "push": "Array",
-    
+
     # "sort" is ambiguous: Python list.sort, Rust Vec::sort, JS Array.sort
     "sort": "list",
-    
+
     # "map" is ambiguous: Python map(), Rust Iterator::map, JS Array::map
     "map": "Array",
-    
+
     # "filter" is ambiguous: Python filter(), Rust Iterator::filter, JS Array::filter
     "filter": "Array",
-    
+
     # "len" is ambiguous: Rust len(), C++ size(), Python len()
     "len": "list",
-    
+
     # "new" is ambiguous: Rust Vec::new, JS new Array(), Python list()
     "new": "list",
-    
+
     # "copy" is ambiguous: Python list.copy, Rust clone(), C++ copy()
     "copy": "list",
-    
+
     # "close" is ambiguous: File.close, connection.close
     "close": "File",
-    
+
     # "read" is ambiguous: File.read, socket.read
     "read": "File",
-    
+
     # "write" is ambiguous: File.write, socket.write
     "write": "File",
 
@@ -597,8 +494,8 @@ _METHOD_DISAMBIGUATION: dict[str, str] = {
     "nbytes": "Series", "memory_usage": "Series", "to_frame": "Series",
     "to_dict": "Series", "to_list": "Series", "to_numpy": "Series",
     "to_csv": "Series", "to_json": "Series", "to_excel": "Series",
-    "to_pickle": "Series", "isna": "Series", "isnull": "Series",
-    "notna": "Series", "notnull": "Series", "abs": "Series",
+    "to_pickle": "Series", "isna": "Series",
+    "notna": "Series", "abs": "Series",
     "clip": "Series", "between": "Series", "eq": "Series", "ne": "Series",
     "lt": "Series", "le": "Series", "gt": "Series", "ge": "Series",
     "add": "Series", "radd": "Series", "sub": "Series", "rsub": "Series",

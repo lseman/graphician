@@ -90,7 +90,7 @@ def resolve_spring_injections(graph: Graph) -> int:
 
 
 class _InjectionSite:
-    __slots__ = ("field_id", "declared_type", "qualifier")
+    __slots__ = ("declared_type", "field_id", "qualifier")
 
     def __init__(
         self,

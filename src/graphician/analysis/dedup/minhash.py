@@ -65,7 +65,7 @@ class MinHash:
         """Estimate Jaccard similarity between two signatures."""
         if not self.signature:
             return 0.0
-        matches = sum(1 for a, b in zip(self.signature, other.signature) if a == b)
+        matches = sum(1 for a, b in zip(self.signature, other.signature, strict=False) if a == b)
         return matches / len(self.signature)
 
 

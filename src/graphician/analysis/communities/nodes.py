@@ -6,7 +6,6 @@ from typing import Any
 
 import networkx as nx
 
-from ...core.edge import Confidence, EdgeKind
 from ...core.graph import Graph
 from ...core.id import NodeId
 from ...core.node import Node, NodeKind
@@ -157,6 +156,4 @@ def is_rank_noise(node: Node) -> bool:
     """
     if node.kind in (NodeKind.FILE, NodeKind.FLOW, NodeKind.HYPEREDGE):
         return True
-    if node.qualified_name.startswith("call::"):
-        return True
-    return False
+    return bool(node.qualified_name.startswith("call::"))

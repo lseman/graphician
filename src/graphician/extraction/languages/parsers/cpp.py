@@ -31,7 +31,7 @@ def _text(node: ts.Node) -> str:
 
 
 def _children(node: ts.Node) -> list[ts.Node]:
-    
+
     return list(node.children)
 
 
@@ -72,9 +72,7 @@ def _emit_calls(
     stack = _children(node)
     while stack:
         child = stack.pop()
-        if child.type == "call_expression":
-            _emit_call_expr(child, source, graph, caller_id)
-        elif child.type == "new_expression":
+        if child.type == "call_expression" or child.type == "new_expression":
             _emit_call_expr(child, source, graph, caller_id)
         stack.extend(_children(child))
 
@@ -189,13 +187,10 @@ def _handle_namespace(
 ) -> None:
     """Handle namespace definitions."""
     name_node = node.child_by_field_name("name")
-    if not name_node:
-        # Anonymous namespace
-        name = "__anon"
-    else:
-        name = _text(name_node)
+    # Anonymous namespace if there's no name node.
+    name = "__anon" if not name_node else _text(name_node)
 
-    child_scope = scope + [name]
+    child_scope = [*scope, name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
     mod_qn = f"module::{qn}"
 
@@ -225,7 +220,7 @@ def _handle_class(
         return
 
     name = _text(name_node)
-    child_scope = scope + [name]
+    child_scope = [*scope, name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
     class_id = _add_node(graph, NodeKind.CLASS, qn, path,
@@ -257,7 +252,7 @@ def _handle_struct(
         return
 
     name = _text(name_node)
-    child_scope = scope + [name]
+    child_scope = [*scope, name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
     struct_id = _add_node(graph, NodeKind.CLASS, qn, path,
@@ -341,7 +336,7 @@ def _handle_function(
         return
 
     name = _text(name_node)
-    child_scope = scope + [name]
+    child_scope = [*scope, name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
     kind = NodeKind.METHOD if is_method else NodeKind.FUNCTION
@@ -372,7 +367,7 @@ def _handle_declaration(
             name_node = child.child_by_field_name("name")
             if name_node:
                 name = _text(name_node)
-                child_scope = scope + [name]
+                child_scope = [*scope, name]
                 qn = f"{file_qn}::{'::'.join(child_scope)}"
                 _add_node(graph, NodeKind.VARIABLE, qn, path,
                           node.start_point.row, node.end_point.row)

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+
 def architecture_overview_json(graph, detail: str = "standard") -> dict[str, Any]:
     """Architecture overview at community level.
 
@@ -17,7 +18,7 @@ def architecture_overview_json(graph, detail: str = "standard") -> dict[str, Any
     Returns:
         Architecture overview with communities, coupling, bridges, etc.
     """
-    from .analysis import articulation_json, bridge_nodes_json, core_json, cycles_json
+    from .analysis import articulation_json, core_json, cycles_json
 
     communities = _detect_communities(graph)
     by_comm: dict[int, list] = {}
@@ -212,7 +213,6 @@ def _cross_community_coupling(graph, communities: dict[Any, int], detail: str) -
 
 def _bridge_rows(graph, communities: dict[Any, int], detail: str) -> list[dict[str, Any]]:
     """Find bridge nodes (nodes connecting multiple communities)."""
-    comm_degree: dict[int, int] = {}
     node_comms: dict[Any, set[int]] = {}
 
     for _, src, dst, _ in graph.edges():

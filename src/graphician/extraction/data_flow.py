@@ -19,9 +19,7 @@ Variable nodes are created on-the-fly when an assignment is detected.
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
 
 from ..core.edge import Edge, EdgeKind
@@ -155,8 +153,8 @@ def _ts_extract_python(
 ) -> list[DataFlowEdge]:
     """Extract data flow from Python source using tree-sitter."""
     try:
-        import tree_sitter_python as tspython
         import tree_sitter as ts
+        import tree_sitter_python as tspython
     except ImportError:
         return []
 
@@ -428,8 +426,8 @@ def _ts_extract_rust(
 ) -> list[DataFlowEdge]:
     """Extract data flow from Rust source using tree-sitter."""
     try:
-        import tree_sitter_rust as tsrust
         import tree_sitter as ts
+        import tree_sitter_rust as tsrust
     except ImportError:
         return []
 
@@ -668,8 +666,8 @@ def _ts_extract_ts(
 ) -> list[DataFlowEdge]:
     """Extract data flow from TS/JS source using tree-sitter."""
     try:
-        import tree_sitter_typescript as tstypescript
         import tree_sitter as ts
+        import tree_sitter_typescript as tstypescript
     except ImportError:
         return []
 
@@ -687,11 +685,10 @@ def _ts_extract_ts(
                 _ts_extract_ts_expression(
                     graph, function_id, child, source_text, params, edges
                 )
-        elif node.type == "return_statement":
-            if node.children:
-                _ts_extract_ts_return(
-                    graph, function_id, node.children[0], source_text, params, edges
-                )
+        elif node.type == "return_statement" and node.children:
+            _ts_extract_ts_return(
+                graph, function_id, node.children[0], source_text, params, edges
+            )
 
     return edges
 
@@ -934,8 +931,8 @@ def _ts_extract_java(
 ) -> list[DataFlowEdge]:
     """Extract data flow from Java source using tree-sitter."""
     try:
-        import tree_sitter_java as tsjava
         import tree_sitter as ts
+        import tree_sitter_java as tsjava
     except ImportError:
         return []
 
@@ -949,11 +946,10 @@ def _ts_extract_java(
             _ts_extract_java_var(
                 graph, function_id, node, source_text, params, edges
             )
-        elif node.type == "return_statement":
-            if node.children:
-                _ts_extract_java_return(
-                    graph, function_id, node.children[0], source_text, params, edges
-                )
+        elif node.type == "return_statement" and node.children:
+            _ts_extract_java_return(
+                graph, function_id, node.children[0], source_text, params, edges
+            )
 
     return edges
 
@@ -1274,10 +1270,7 @@ def parse_assignment(line: str) -> tuple[str, str] | None:
         s = s[5:]
 
     # Strip `let ` prefix
-    if s.startswith("let "):
-        s = s[4:]
-    # Strip `mut ` prefix (Rust)
-    elif s.startswith("mut "):
+    if s.startswith("let ") or s.startswith("mut "):
         s = s[4:]
 
     # Find the equals sign
@@ -1316,7 +1309,7 @@ def extract_params(source_text: str, source_path: str = "") -> list[str]:
     Extracts parameter names from function signatures across languages.
     Uses dialect from source_path to choose the right parser.
     """
-    dialect = _detect_dialect(source_path)
+    _detect_dialect(source_path)
     params: list[str] = []
 
     for line in source_text.splitlines():

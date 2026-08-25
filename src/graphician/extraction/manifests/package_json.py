@@ -17,7 +17,6 @@ from typing import Any
 
 from ...core.edge import Edge, EdgeKind
 from ...core.graph import Graph
-from ...core.id import NodeId
 from ...core.node import Node, NodeKind
 
 logger = logging.getLogger(__name__)
@@ -48,7 +47,7 @@ def extract_file(path: str | Path) -> Graph:
     try:
         with open(path) as f:
             data = json.load(f)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- malformed package.json must not crash extraction
         logger.error("Failed to parse %s: %s", path, e)
         return Graph()
 

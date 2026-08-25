@@ -7,8 +7,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ....core.edge import EdgeKind
-
 
 def rename_preview_json(graph, target: str, new_name: str) -> dict[str, Any] | None:
     """Preview a symbol rename with all edit sites and confidence scores.

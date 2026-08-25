@@ -9,9 +9,10 @@ from pathlib import Path
 from typing import Any, BinaryIO, cast
 from urllib.parse import unquote, urlparse
 
+from ..core.edge import EdgeKind
 from ..core.graph import Graph
 from ..core.id import NodeId
-from ..core.node import Node, NodeKind
+from ..core.node import NodeKind
 from .compiler import (
     COMPILER_EVIDENCE_VERSION,
     CompilerEdgeEvidence,
@@ -19,7 +20,6 @@ from .compiler import (
     CompilerEvidenceFile,
     apply_compiler_evidence,
 )
-from ..core.edge import EdgeKind
 
 
 @dataclass(frozen=True)

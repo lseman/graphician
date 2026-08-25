@@ -269,12 +269,15 @@ def _build_related(
     impacted = result.get("impacted_files") or result.get("changed_files")
     if isinstance(impacted, list):
         for item in impacted:
-            if isinstance(item, str) and item not in session.files_touched:
-                if item not in seen:
-                    related.append(item)
-                    seen.add(item)
-                    if len(related) >= _MAX_PER_CATEGORY:
-                        break
+            if (
+                isinstance(item, str)
+                and item not in session.files_touched
+                and item not in seen
+            ):
+                related.append(item)
+                seen.add(item)
+                if len(related) >= _MAX_PER_CATEGORY:
+                    break
     return related
 
 

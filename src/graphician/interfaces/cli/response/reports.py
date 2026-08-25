@@ -192,8 +192,7 @@ def export_graphml(graph, output: str) -> dict[str, Any]:
     lines.append('  <graph edgedefault="directed">')
 
     node_map: dict[Any, str] = {}
-    idx = 0
-    for nid, node in graph.nodes():
+    for idx, (nid, node) in enumerate(graph.nodes()):
         graph_id = f"n{idx}"
         node_map[nid] = graph_id
         comm = comm_map.get(nid, -1)
@@ -205,7 +204,6 @@ def export_graphml(graph, output: str) -> dict[str, Any]:
             f'<data key="comm">{comm}</data>'
             f'</node>'
         )
-        idx += 1
 
     for _, src, dst, edge in graph.edges():
         src_id = node_map.get(src, "")
@@ -226,7 +224,7 @@ def export_graphml(graph, output: str) -> dict[str, Any]:
             f.write(xml)
         written = True
         size = len(xml)
-    except OSError as e:
+    except OSError:
         written = False
         size = 0
 

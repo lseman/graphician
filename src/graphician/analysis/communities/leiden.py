@@ -12,12 +12,11 @@ implementation with:
 
 from __future__ import annotations
 
-from collections import defaultdict, deque
+from collections import defaultdict
 from typing import Any
 
 import numpy as np
 
-from ...core.edge import EdgeKind
 from ...core.graph import Graph
 from ...core.id import NodeId
 from .core import (
@@ -26,7 +25,6 @@ from .core import (
     aggregate,
     densify,
     enforce_connected,
-    identity_labels,
     relabel,
 )
 from .numba_accel import _local_move_csr, build_csr_from_working, has_numba
@@ -331,7 +329,7 @@ def _refinement_phase(
     # Assemble global result
     result: list[int] = [total_labels] * n
     for idx, (_, members) in enumerate(parents):
-        for u, label in zip(members, per_parent_labels[idx]):
+        for u, label in zip(members, per_parent_labels[idx], strict=False):
             result[u] = label
 
     # Enforce connectivity (Leiden guarantee)

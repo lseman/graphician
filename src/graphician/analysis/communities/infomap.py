@@ -17,7 +17,6 @@ from typing import Any
 
 import numpy as np
 
-from ...core.edge import EdgeKind
 from ...core.graph import Graph
 from ...core.id import NodeId
 from .core import (
@@ -26,12 +25,10 @@ from .core import (
     aggregate,
     densify,
     enforce_connected,
-    identity_labels,
     relabel,
 )
 from .numba_accel import _random_walk_init_csr, build_csr_from_working, has_numba
 from .utils import _find_cross_community_edges, _modularity, _to_networkx
-
 
 # ── LCG RNG ─────────────────────────────────────────────────────────
 
@@ -186,7 +183,7 @@ def _run_infomap_multilevel(
             aggregation_partition = densify(labels)
 
         # Check if partition changed
-        moved = any(l != aggregation_partition[i] for i, l in enumerate(labels))
+        moved = any(label != aggregation_partition[i] for i, label in enumerate(labels))
 
         # Update original-node mapping: map each original node's current super-node
         # to the aggregated community. Mirrors Rust:
@@ -347,7 +344,7 @@ def _compute_lmdl(
 
 class _CommunityFlow:
     """Per-community flow statistics."""
-    __slots__ = ("node_probability", "exit_probability", "node_probabilities")
+    __slots__ = ("exit_probability", "node_probabilities", "node_probability")
 
     def __init__(self) -> None:
         self.node_probability: float = 0.0
@@ -366,17 +363,17 @@ def _compute_community_flow(
     """
     flow: dict[int, _CommunityFlow] = {}
 
-    for u, l in enumerate(labels):
-        if l not in flow:
-            flow[l] = _CommunityFlow()
+    for u, label in enumerate(labels):
+        if label not in flow:
+            flow[label] = _CommunityFlow()
 
-        entry = flow[l]
+        entry = flow[label]
         node_probability = working.degree[u] / two_m
         entry.node_probability += node_probability
         entry.node_probabilities.append(node_probability)
 
         for v, w in working.adj[u]:
-            if labels[v] != l:
+            if labels[v] != label:
                 entry.exit_probability += w / two_m
 
     return flow
@@ -387,7 +384,7 @@ def _compute_community_flow(
 
 class _CommunityStats:
     """Per-community flow stats for incremental computation."""
-    __slots__ = ("node_probability", "exit_probability", "h_p_sum")
+    __slots__ = ("exit_probability", "h_p_sum", "node_probability")
 
     def __init__(
         self,
@@ -421,9 +418,9 @@ def _precompute_incremental(
         _CommunityStats() for _ in range(max_label + 1)
     ]
 
-    for u, l in enumerate(labels):
+    for u, label in enumerate(labels):
         p = working.degree[u] / two_m
-        entry = stats[l]
+        entry = stats[label]
         entry.node_probability += p
         entry.h_p_sum += _entropy_term(p)
 

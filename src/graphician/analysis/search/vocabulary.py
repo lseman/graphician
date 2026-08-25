@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 
-
 SEARCH_STOPWORDS: tuple[str, ...] = (
     "and", "are", "for", "from", "has", "have", "how",
     "the", "what", "when", "where", "who", "why", "with",

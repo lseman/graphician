@@ -34,7 +34,6 @@ def cmd_wiki(db_path: str, output: str, force: bool = False) -> dict[str, Any]:
         Summary dict with pages_generated, pages_updated, pages_unchanged.
     """
     from ...persistence.store import GraphStore
-    from ...analysis.communities import detect_communities
 
     store = GraphStore(db_path)
     graph = store.load_graph()
@@ -230,7 +229,7 @@ def _generate_community_page(graph, comm: dict[str, Any]) -> str:
     if member_nodes:
         lines.append("| Name | Kind | File | Lines |")
         lines.append("|------|------|------|-------|")
-        for nid_val, node in member_nodes:
+        for _nid_val, node in member_nodes:
             name = _sanitize_name(node.name)
             kind_str = node.kind.value
             file = node.source_uri or "-"
@@ -268,7 +267,7 @@ def _generate_community_page(graph, comm: dict[str, Any]) -> str:
     community_flows.sort(key=lambda x: (-x[1], x[2]))
 
     flow_count = 0
-    for nid, crit, flow_qn, depth in community_flows:
+    for _nid, crit, flow_qn, depth in community_flows:
         if flow_count >= 10:
             break
         lines.append(

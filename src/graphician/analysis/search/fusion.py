@@ -9,17 +9,13 @@ Mirrors the Rust ``fusion.rs`` module.
 
 from __future__ import annotations
 
-import math
 from collections import defaultdict
-from typing import Any
 
 from ...core.graph import Graph
 from ...core.id import NodeId
 from ...core.node import Node, NodeKind
-from .vocabulary import _normalize_identifier
 from .types import SearchHit
-from .vocabulary import SEARCH_STOPWORDS
-
+from .vocabulary import SEARCH_STOPWORDS, _normalize_identifier
 
 # Reciprocal rank fusion constant
 RRF_K: float = 60.0

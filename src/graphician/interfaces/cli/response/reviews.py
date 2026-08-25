@@ -9,8 +9,6 @@ import logging
 from collections import deque
 from typing import Any
 
-from ....core.node import NodeKind
-
 logger = logging.getLogger(__name__)
 
 
@@ -153,12 +151,10 @@ def traverse_json(
 
         # Add neighbors to queue
         neighbors = []
-        if direction in ("out", "both"):
-            if hasattr(graph, "out_neighbors"):
-                neighbors.extend(n for n, _ in graph.out_neighbors(node_id))
-        if direction in ("in", "both"):
-            if hasattr(graph, "in_neighbors"):
-                neighbors.extend(n for n, _ in graph.in_neighbors(node_id))
+        if direction in ("out", "both") and hasattr(graph, "out_neighbors"):
+            neighbors.extend(n for n, _ in graph.out_neighbors(node_id))
+        if direction in ("in", "both") and hasattr(graph, "in_neighbors"):
+            neighbors.extend(n for n, _ in graph.in_neighbors(node_id))
 
         for next_id in neighbors:
             if next_id not in seen:
@@ -206,13 +202,9 @@ def counterfactual_json(
 
     # Collect edges to drop
     dropped_edge_ids: set = set()
-    for edge_id, src, dst, edge in graph.edges():
+    for edge_id, src, dst, _edge in graph.edges():
         drop = False
-        if direction == "in" and dst == target_id:
-            drop = True
-        elif direction == "out" and src == target_id:
-            drop = True
-        elif direction == "both" and (src == target_id or dst == target_id):
+        if (direction == "in" and dst == target_id) or (direction == "out" and src == target_id) or (direction == "both" and (src == target_id or dst == target_id)):
             drop = True
         if drop:
             dropped_edge_ids.add(edge_id)
@@ -323,7 +315,7 @@ def file_snippet(path: str, max_lines: int = 200) -> str:
         File content with line numbers, or empty string on error.
     """
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
         out = []
         for i, line in enumerate(lines[:max_lines]):

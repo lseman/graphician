@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import logging
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from ....core.edge import EdgeKind
-from ....core.node import NodeKind
 from ....core.id import EdgeId, NodeId
 
 logger = logging.getLogger(__name__)
@@ -85,13 +85,9 @@ def is_active_at(
 
     Mirrors the Rust ``is_active_at`` from ``differential.rs``.
     """
-    if valid_from is not None:
-        if valid_from != commit and not is_ancestor(valid_from, commit):
-            return False
-    if valid_to is not None:
-        if valid_to != commit and is_ancestor(valid_to, commit):
-            return False
-    return True
+    if valid_from is not None and valid_from != commit and not is_ancestor(valid_from, commit):
+        return False
+    return not (valid_to is not None and valid_to != commit and is_ancestor(valid_to, commit))
 
 
 def temporal_diff(

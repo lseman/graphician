@@ -27,7 +27,7 @@ class MotifMatch:
 
 def find_motifs(graph: Graph, motif: Motif, limit: int = 50) -> list[MotifMatch]:
     """Find all motif matches in the graph using VF2-style backtracking."""
-    valid, msg = motif.validate()
+    valid, _msg = motif.validate()
     if not valid or not motif.nodes:
         return []
 

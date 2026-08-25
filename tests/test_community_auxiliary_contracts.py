@@ -55,8 +55,8 @@ def test_community_node_rankings_work_without_scipy() -> None:
 
 
 def test_knowledge_gaps_reports_isolates_hotspots_and_single_file_communities(monkeypatch) -> None:
-    graph, ids = _fixture_graph()
-    isolated = graph.add_node(Node.new(NodeKind.FUNCTION, "app::isolated"))
+    graph, _ids = _fixture_graph()
+    graph.add_node(Node.new(NodeKind.FUNCTION, "app::isolated"))
     community_result = {
         "communities": [
             {"id": 0, "size": 6, "nodes": [{"qualified_name": f"app::n{i}"} for i in range(6)]},

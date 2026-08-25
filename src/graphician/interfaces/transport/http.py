@@ -9,8 +9,6 @@ Mirrors the Rust ``http.rs`` transport module.
 from __future__ import annotations
 
 import json
-import os
-import re
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from typing import Any
@@ -146,7 +144,7 @@ class GraphicianHTTPHandler(SimpleHTTPRequestHandler):
 
             self._send_json(200, response)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 -- HTTP handler must return an error, not crash
             self._send_error(500, str(e))
 
     def _serve_search(self, request_path: str) -> None:
@@ -164,8 +162,8 @@ class GraphicianHTTPHandler(SimpleHTTPRequestHandler):
         limit = min(int(params.get("limit", "20")), 100)
 
         try:
-            from ...persistence.store import GraphStore
             from ...analysis.search import ranked_search
+            from ...persistence.store import GraphStore
 
             with GraphStore(self.graph_db) as store:
                 graph = store.load_graph()
@@ -204,7 +202,7 @@ class GraphicianHTTPHandler(SimpleHTTPRequestHandler):
 
             self._send_json(200, response)
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 -- HTTP handler must return an error, not crash
             self._send_error(500, str(e))
 
     def _get_communities(self, graph: Graph) -> dict[int, int]:
@@ -220,7 +218,7 @@ class GraphicianHTTPHandler(SimpleHTTPRequestHandler):
                     if nid:
                         communities[nid.value] = comm["id"]
             return communities
-        except Exception:
+        except Exception:  # noqa: BLE001 -- community detection is a best-effort enhancement
             return {}
 
     def _send_json(self, status: int, data: dict[str, Any]) -> None:
@@ -235,7 +233,7 @@ class GraphicianHTTPHandler(SimpleHTTPRequestHandler):
 
     def _send_error(self, status: int, message: str) -> None:
         """Send an error response."""
-        body = f"{status} {message}".encode("utf-8")
+        body = f"{status} {message}".encode()
         self.send_response(status)
         self.send_header("Content-Type", "text/plain")
         self.send_header("Content-Length", str(len(body)))

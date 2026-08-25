@@ -59,9 +59,7 @@ def is_test_name(name: str) -> bool:
         return True
     if name.startswith("Fuzz"):
         return True
-    if name.startswith("TestMain"):
-        return True
-    return False
+    return bool(name.startswith("TestMain"))
 
 
 def is_test_file_path(file_path: str) -> bool:
@@ -79,9 +77,7 @@ def should_suppress(name: str) -> bool:
         return True
     if lower in _GO_BUILTIN_CALLS:
         return True
-    if lower in _GENERIC_NAMES:
-        return True
-    return False
+    return lower in _GENERIC_NAMES
 
 
 def extract_file(path: Path, graph: Graph, *, file_qn: str | None = None, source_path: Path | None = None) -> NodeId:
@@ -124,7 +120,6 @@ def extract(
     tree = parser.parse(source_str)
 
     file_is_test = is_test_file_path(str(path))
-    file_name = path.stem
     file_node = Node.new(NodeKind.FILE, file_qn).with_property("dialect", "go")
     graph.add_node(file_node)
 
@@ -239,10 +234,7 @@ def _extract_method(
     if is_test:
         props["is_test"] = "true"
 
-    if receiver_type:
-        qn = f"{file_qn}::{receiver_type}::{name}"
-    else:
-        qn = f"{file_qn}::{name}"
+    qn = f"{file_qn}::{receiver_type}::{name}" if receiver_type else f"{file_qn}::{name}"
 
     node_obj = Node.new(NodeKind.METHOD, qn).with_properties(props)
     node_obj = node_obj.with_source(path, name_node)

@@ -63,7 +63,7 @@ def find_impact(graph: Graph, query: ImpactQuery) -> list[ImpactHit]:
             if pval in best and best[pval][0] <= cost + _impact_cost(edge):
                 continue
             new_cost = cost + _impact_cost(edge)
-            next_via = via + (edge.kind,)
+            next_via = (*via, edge.kind)
             heapq.heappush(heap, (new_cost, distance + 1, pval, next_via))
 
         # A changed symbol can also require coordinated edits in its direct
@@ -77,7 +77,7 @@ def find_impact(graph: Graph, query: ImpactQuery) -> list[ImpactHit]:
             new_cost = cost + forward_cost
             if next_val in best and best[next_val][0] <= new_cost:
                 continue
-            next_via = via + (edge.kind,)
+            next_via = (*via, edge.kind)
             heapq.heappush(heap, (new_cost, distance + 1, next_val, next_via))
 
     hits: list[ImpactHit] = []

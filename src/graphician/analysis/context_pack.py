@@ -8,7 +8,6 @@ when necessary, and never exceeds the token budget.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from typing import Any
 

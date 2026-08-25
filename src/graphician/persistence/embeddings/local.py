@@ -6,7 +6,6 @@ Deterministic, no external dependencies. Complement to FTS5.
 from __future__ import annotations
 
 import struct
-from typing import Any
 
 DEFAULT_EMBEDDING_DIM: int = 384
 
@@ -155,7 +154,7 @@ def canonical_token(token: str) -> str:
         "edge": "graph", "edges": "graph", "flow": "graph", "flows": "graph",
         "http": "server", "server": "server", "serve": "server",
         "route": "server", "routes": "server",
-        "ignore": "ignore", "gitignore": "ignore", "ariadneignore": "ignore",
+        "ignore": "ignore", "gitignore": "ignore", "graphicianignore": "ignore",
         "exclude": "ignore", "skip": "ignore",
         "index": "index", "indexed": "index", "indexing": "index",
         "fts": "index", "fts5": "index",
@@ -345,7 +344,7 @@ def cosine_similarity(left: list[float], right: list[float]) -> float:
     """Compute cosine similarity between two vectors."""
     if len(left) != len(right) or not left:
         return 0.0
-    dot = sum(l * r for l, r in zip(left, right))
+    dot = sum(lv * rv for lv, rv in zip(left, right, strict=False))
     left_norm = sum(v * v for v in left) ** 0.5
     right_norm = sum(v * v for v in right) ** 0.5
     if left_norm == 0.0 or right_norm == 0.0:

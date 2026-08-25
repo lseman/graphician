@@ -6,13 +6,11 @@ temporal modules to raise coverage on the response/ transport layer.
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest
 
 from graphician.core import Edge, EdgeKind, Graph, Node, NodeKind
-
 
 # ── refactor_response ────────────────────────────────────────────────
 
@@ -198,8 +196,9 @@ class TestAnalysisResponseHelpers:
     """Tests for analysis response utility functions."""
 
     def test_diagnostics_json_raises_on_missing_db(self) -> None:
-        from graphician.interfaces.cli.response.analysis import diagnostics_json
         import sqlite3
+
+        from graphician.interfaces.cli.response.analysis import diagnostics_json
 
         with pytest.raises(sqlite3.OperationalError):
             diagnostics_json("/nonexistent/db.sqlite")

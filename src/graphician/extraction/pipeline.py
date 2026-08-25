@@ -3,7 +3,7 @@
 Orchestrates file discovery, tree-sitter parsing, symbol extraction,
 and edge building to populate the graph.
 
-Respects .gitignore, .ariadneignore, and common generated-directory
+Respects .gitignore, .graphicianignore, and common generated-directory
 conventions. File discovery uses walkdir-like traversal with ignore support.
 """
 
@@ -130,7 +130,7 @@ def _dedicated_extractors() -> dict[Language, Any]:
             fragment = Graph()
             try:
                 native(path, fragment, **kwargs)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 -- native extractor raises backend-specific errors
                 logger.warning(
                     "Native %s extraction failed for %s; using Python fallback: %s",
                     language.value,
@@ -187,17 +187,17 @@ class ExtractionPipeline:
     ) -> list[Path]:
         """Discover source files under root.
 
-        Respects .gitignore and .ariadneignore. Skips generated directories.
+        Respects .gitignore and .graphicianignore. Skips generated directories.
         """
         exclude = (exclude or set()) | DEFAULT_EXCLUDES
         root = root.resolve()
         files: list[Path] = []
         ignore_patterns: list[str] = []
 
-        # Load .ariadneignore
-        ariadneignore = root / ".ariadneignore"
-        if ariadneignore.exists():
-            for line in ariadneignore.read_text().splitlines():
+        # Load .graphicianignore
+        graphicianignore = root / ".graphicianignore"
+        if graphicianignore.exists():
+            for line in graphicianignore.read_text().splitlines():
                 line = line.strip()
                 if line and not line.startswith("#"):
                     ignore_patterns.append(line)

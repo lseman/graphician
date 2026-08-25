@@ -1,7 +1,7 @@
 """Custom language support via TOML-based language definitions.
 
 Delegates to the central ``language_registry`` for language resolution
-and file extraction. Custom languages defined in ``.ariadne/languages.toml``
+and file extraction. Custom languages defined in ``.graphician/languages.toml``
 get a lightweight generic tree-sitter walker.
 
 Mirrors the Rust ``custom_lang.rs`` module.
@@ -14,7 +14,7 @@ from typing import Any
 
 from ...core.edge import Edge, EdgeKind
 from ...core.node import Node, NodeKind
-from .language_registry import get_language, get_language_by_path, registry, LanguageDef
+from .language_registry import LanguageDef
 
 
 def extract_file(

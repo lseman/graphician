@@ -9,7 +9,6 @@ when the database has changed and needs reloading.
 
 from __future__ import annotations
 
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -23,7 +22,7 @@ from ...persistence.store import GraphStore
 class _DbFingerprint:
     """Fingerprint of the on-disk DB state a cached graph was loaded from."""
 
-    __slots__ = ("main_mtime", "main_len", "wal_mtime", "wal_len")
+    __slots__ = ("main_len", "main_mtime", "wal_len", "wal_mtime")
 
     def __init__(
         self,
@@ -38,7 +37,7 @@ class _DbFingerprint:
         self.wal_len = wal_len
 
     @classmethod
-    def capture(cls, db_path: str | Path) -> "_DbFingerprint":
+    def capture(cls, db_path: str | Path) -> _DbFingerprint:
         db_path = Path(db_path)
         try:
             main_stat = db_path.stat()

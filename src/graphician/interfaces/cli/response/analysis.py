@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ....core.edge import Confidence, EdgeKind
+from ....core.edge import Confidence
 
 
 def bridge_nodes_json(graph, limit: int = 25) -> dict[str, Any]:
@@ -412,7 +412,7 @@ def _find_cycles(graph, limit: int = 100) -> list[dict[str, Any]]:
                     })
             elif neighbor not in visited:
                 visited.add(neighbor)
-                _dfs(neighbor, path + [neighbor])
+                _dfs(neighbor, [*path, neighbor])
 
     for nid, _node in graph.nodes():
         if nid not in visited:

@@ -6,6 +6,7 @@ from the final graph output based on configurable suppression rules.
 
 from __future__ import annotations
 
+import contextlib
 import re
 from typing import Any
 
@@ -32,10 +33,8 @@ class SuppressList:
     ) -> None:
         self._compiled: list[re.Pattern[str]] = []
         for p in (patterns or DEFAULT_SUPPRESS_PATTERNS):
-            try:
+            with contextlib.suppress(re.error):  # skip invalid patterns
                 self._compiled.append(re.compile(p))
-            except re.error:
-                pass  # skip invalid patterns
         self._prefixes = qname_prefixes or []
         self._min_source_length = min_source_length
 
@@ -54,17 +53,14 @@ class SuppressList:
         for prefix in self._prefixes:
             if qname.startswith(prefix):
                 return True
-        if self._min_source_length > 0:
-            if source_uri is None or len(source_uri) < self._min_source_length:
-                return True
-        return False
+        return self._min_source_length > 0 and (
+            source_uri is None or len(source_uri) < self._min_source_length
+        )
 
     def add_pattern(self, pattern: str) -> None:
         """Add a regex pattern to the suppression list."""
-        try:
+        with contextlib.suppress(re.error):
             self._compiled.append(re.compile(pattern))
-        except re.error:
-            pass
 
     @classmethod
     def default(cls) -> SuppressList:

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -159,8 +158,8 @@ def _handle_request(
 
 def _graph_json(db_path: str, algorithm: str, request_path: str) -> str:
     """Generate graph data JSON for the explorer."""
-    from ...persistence.store import GraphStore
     from ...analysis.communities import detect_communities
+    from ...persistence.store import GraphStore
 
     store = GraphStore(db_path)
     graph = store.load_graph()
@@ -236,8 +235,8 @@ def _graph_json(db_path: str, algorithm: str, request_path: str) -> str:
 
 def _search_json(db_path: str, query: str, request_path: str) -> str:
     """Generate search results JSON for the explorer."""
-    from ...persistence.store import GraphStore
     from ...analysis.search import ranked_search
+    from ...persistence.store import GraphStore
 
     store = GraphStore(db_path)
     graph = store.load_graph()
@@ -323,7 +322,7 @@ def cmd_serve(db_path: str, bind: str = "127.0.0.1:8080", algorithm: str = "louv
                 stream, _ = listener.accept()
                 _handle_request(stream, str(db), algorithm)
                 stream.close()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- one failed request must not kill the server loop
                 logger.warning("request failed: %s", e)
     except KeyboardInterrupt:
         print("\nShutting down...")

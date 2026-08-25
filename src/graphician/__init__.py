@@ -1,5 +1,5 @@
-from .core.node import Node, NodeKind
-from .core.edge import Edge, EdgeKind, Confidence
+from .core.edge import Confidence, Edge, EdgeKind
 from .core.graph import Graph
+from .core.node import Node, NodeKind
 
-__all__ = ["Node", "NodeKind", "Edge", "EdgeKind", "Confidence", "Graph"]
+__all__ = ["Confidence", "Edge", "EdgeKind", "Graph", "Node", "NodeKind"]

@@ -9,13 +9,9 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
-from graphician.core.edge import Edge, EdgeKind
 from graphician.core.graph import Graph
 from graphician.core.id import NodeId
-from graphician.core.node import Node, NodeKind
-
+from graphician.core.node import NodeKind
 
 # ── text / children helpers ──────────────────────────────────────────
 
@@ -79,7 +75,7 @@ class TestTextHelpers:
         from graphician.extraction.languages.parsers.base import _child_by_name
 
         children: list[MagicMock] = []
-        for i, ctype in enumerate(["foo", "bar"]):
+        for _i, ctype in enumerate(["foo", "bar"]):
             c = MagicMock()
             c.type = ctype
             c.children = []

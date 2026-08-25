@@ -12,7 +12,6 @@ from typing import Any
 
 from ...core.edge import Edge, EdgeKind
 from ...core.graph import Graph
-from ...core.id import NodeId
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,7 @@ def parse_jedi_results(
         if not isinstance(result, list) or len(result) < 4:
             continue
 
-        file_path = str(result[0])
+        str(result[0])
         jedi_line = int(result[1])
         enclosing = str(result[2])
         target = str(result[3])

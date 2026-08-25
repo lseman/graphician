@@ -268,7 +268,7 @@ def _parse_toml(content: str) -> dict[str, Any] | None:
 
     try:
         return tomllib.loads(content)
-    except Exception:
+    except Exception:  # noqa: BLE001 -- malformed manifest TOML must not crash extraction
         return None
 
 

@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-from .normalize import normalize_label, shannon_entropy, passes_entropy_gate
-from .minhash import MinHash, shingle
 from .lsh import LshIndex, lsh_candidate_pairs
+from .minhash import MinHash, shingle
+from .normalize import normalize_label, passes_entropy_gate, shannon_entropy
 from .similarity import jaro_winkler
-from .union_find import UnionFind, deduplicate_nodes
 from .types import DedupOptions, DedupResult
+from .union_find import UnionFind, deduplicate_nodes
 
 __all__ = [
-    "normalize_label",
-    "shannon_entropy",
-    "passes_entropy_gate",
-    "MinHash",
-    "shingle",
-    "LshIndex",
-    "lsh_candidate_pairs",
-    "jaro_winkler",
-    "UnionFind",
-    "deduplicate_nodes",
     "DedupOptions",
     "DedupResult",
+    "LshIndex",
+    "MinHash",
+    "UnionFind",
+    "deduplicate_nodes",
+    "jaro_winkler",
+    "lsh_candidate_pairs",
+    "normalize_label",
+    "passes_entropy_gate",
+    "shannon_entropy",
+    "shingle",
 ]

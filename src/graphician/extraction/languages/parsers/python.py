@@ -240,7 +240,7 @@ def _handle_class(
     if not name_node:
         return
     name = _text(name_node, source)
-    child_scope = scope + [name]
+    child_scope = [*scope, name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
     decorators = _extract_decorators(node, source)
@@ -316,7 +316,7 @@ def _handle_function(
     name = _text(name_node, source)
     is_test = file_is_test or _is_test_name(name)
 
-    child_scope = scope + [name]
+    child_scope = [*scope, name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
     decorators = _extract_decorators(node, source)

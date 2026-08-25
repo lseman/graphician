@@ -1,5 +1,7 @@
 """Tests for the framework pattern detection engine."""
 
+import dataclasses
+
 import pytest
 
 from graphician.core.edge import Edge, EdgeKind
@@ -10,10 +12,10 @@ from graphician.extraction.patterns.framework_patterns import (
     PatternCategory,
     PatternMatch,
     _built_in_patterns,
+    _match_single_pattern,
     detect_patterns,
     load_patterns_from_file,
     merged_catalog,
-    _match_single_pattern,
 )
 
 
@@ -212,7 +214,7 @@ class TestPatternMatch:
             confidence=0.75,
             source_uris=["app.py"],
         )
-        with pytest.raises(Exception):
+        with pytest.raises(dataclasses.FrozenInstanceError):
             m.pattern_id = "other"
 
 

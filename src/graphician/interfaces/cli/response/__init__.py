@@ -12,11 +12,10 @@ Mirrors the Rust ``mod.rs`` as the response dispatcher.
 
 from __future__ import annotations
 
-import json
 import logging
 from collections import deque
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from ....analysis.communities import detect_communities, knowledge_gaps
 from ....analysis.structure import find_dead_code
@@ -25,26 +24,7 @@ from ....core.graph import Graph
 from ....core.id import NodeId
 from ....persistence.store import GraphStore
 
-logger = logging.getLogger(__name__)
-
 # Sub-modules
-from .hints import SessionState, generate_hints
-from .temporal import detect_changes_json, differential_json, graph_diff_json, risk_json
-from .reviews import (
-    counterfactual_json,
-    file_snippet,
-    review_context_json,
-    suggested_questions_json,
-    traverse_json,
-)
-from .reports import generate_report_markdown, export_graphml
-from .flows import handle_flows, handle_affected_flows, handle_blast_radius, handle_test_coverage
-from .paths import handle_paths
-from .refactor_response import rename_preview_json
-from .snapshot_diff import snapshot_diff_json
-from .token_savings import token_savings_for_graph
-from .token_benchmark import run_token_benchmark, benchmark_json
-from .architecture import architecture_overview_json, community_split_json
 from .analysis import (
     articulation_json,
     bridge_nodes_json,
@@ -55,8 +35,26 @@ from .analysis import (
     large_functions_json,
     surprises_json,
 )
-from .search import handle_search, handle_context_pack, find_related_json
-from .impact import handle_impact, handle_god_nodes, hub_nodes_json
+from .architecture import architecture_overview_json, community_split_json
+from .flows import handle_affected_flows, handle_blast_radius, handle_flows, handle_test_coverage
+from .hints import SessionState, generate_hints
+from .impact import handle_god_nodes, handle_impact, hub_nodes_json
+from .paths import handle_paths
+from .refactor_response import rename_preview_json
+from .reports import export_graphml, generate_report_markdown
+from .reviews import (
+    counterfactual_json,
+    review_context_json,
+    suggested_questions_json,
+    traverse_json,
+)
+from .search import find_related_json, handle_context_pack, handle_search
+from .snapshot_diff import snapshot_diff_json
+from .temporal import detect_changes_json, differential_json, graph_diff_json, risk_json
+from .token_benchmark import benchmark_json, run_token_benchmark
+from .token_savings import token_savings_for_graph
+
+logger = logging.getLogger(__name__)
 
 # -----------------------------------------------------------------------
 # Types
@@ -70,7 +68,7 @@ class DetailLevel:
     Standard = "standard"
     Full = "full"
 
-    _MAP = {"minimal": "minimal", "full": "full"}
+    _MAP: ClassVar[dict[str, str]] = {"minimal": "minimal", "full": "full"}
 
     @classmethod
     def parse(cls, value: str) -> str:
@@ -327,8 +325,10 @@ def _dispatch(
         "impact_radius": "blast_radius",
         "differential": "differential",  # alias to itself for clarity
     }.get(operation, operation)
-    limit_fn = lambda d=_limit_param, p=params: d(p)
-    base_fn = lambda p=params: _base_param(p)
+    def limit_fn(d=_limit_param, p=params):
+        return d(p)
+    def base_fn(p=params):
+        return _base_param(p)
 
     handlers = {
         "status": lambda: _status(graph),
@@ -491,7 +491,7 @@ def _dispatch(
     if handler:
         try:
             return handler()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 -- tool dispatch must return an error, not crash
             return {"operation": operation, "error": str(e)}
 
     return {"operation": operation, "error": f"unknown tool operation {operation}"}

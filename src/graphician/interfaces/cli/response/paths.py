@@ -43,7 +43,7 @@ def handle_paths(graph, params: dict[str, Any]) -> dict[str, Any]:
             PathQuery(from_id=from_id, to_id=to_id, max_hops=max_hops),
             limit,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 -- native pathfinding raises backend-specific errors
         # Fallback: simple BFS paths
         paths = _simple_paths(graph, from_id, to_id, max_hops, limit)
 
@@ -134,7 +134,7 @@ def _simple_paths(graph, from_id, to_id, max_hops, limit):
         for neighbor, edge in neighbors:
             if neighbor in path_nodes:
                 continue
-            path_key = tuple(str(n) for n in path_nodes + [neighbor])
+            path_key = tuple(str(n) for n in [*path_nodes, neighbor])
             if path_key in seen_paths:
                 continue
             seen_paths.add(path_key)
@@ -160,7 +160,7 @@ def _simple_paths(graph, from_id, to_id, max_hops, limit):
                 }
                 edge_cost = base_costs.get(edge.kind, 1.5)
 
-            new_path = path_nodes + [neighbor]
+            new_path = [*path_nodes, neighbor]
             queue.append((neighbor, new_path, cost + edge_cost))
 
     results.sort(key=lambda p: p.cost)

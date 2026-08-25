@@ -6,8 +6,6 @@ interchange, supported by Gephi, yEd, Cytoscape, and many other tools.
 
 from __future__ import annotations
 
-from typing import Any
-
 
 def export_graphml(
     graph,

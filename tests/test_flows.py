@@ -5,10 +5,10 @@ from graphician.core.graph import Graph
 from graphician.core.node import Node, NodeKind
 from graphician.extraction.flows import (
     FlowOptions,
+    affected_flows,
     all_flows,
     compute_flows,
     flows_through,
-    affected_flows,
 )
 
 

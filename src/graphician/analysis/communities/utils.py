@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import networkx as nx
 from typing import Any
 
+import networkx as nx
+
 from ...core.graph import Graph
-from ...core.id import NodeId
-from ...core.node import NodeKind
 
 
 def _find_community(node_id: int, communities: dict[int, set[int]]) -> int:
@@ -43,7 +42,7 @@ def _modularity(graph: nx.DiGraph, communities: dict[int, set[int]]) -> float:
     ug = graph.to_undirected()
     try:
         return nx.algorithms.community.modularity(ug, communities.values())
-    except Exception:
+    except Exception:  # noqa: BLE001 -- networkx raises varied errors on degenerate partitions
         return 0.0
 
 

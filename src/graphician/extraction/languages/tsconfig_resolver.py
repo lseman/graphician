@@ -12,16 +12,13 @@ correctly across files.
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ...core.edge import Edge, EdgeKind
 from ...core.graph import Graph
 from ...core.id import NodeId
-from ...core.node import Node, NodeKind
-
+from ...core.node import NodeKind
 
 # Extensions probed when resolving an alias target
 PROBE_EXTENSIONS: list[str] = [
@@ -365,10 +362,7 @@ def _probe_target(
     target_pattern: str,
 ) -> str | None:
     """Probe a target pattern against tsconfig base URL and extensions."""
-    if base_url:
-        base_path = base_url
-    else:
-        base_path = tsconfig_dir
+    base_path = base_url or tsconfig_dir
 
     return _probe_with_extensions(f"{base_path}/{target_pattern}")
 

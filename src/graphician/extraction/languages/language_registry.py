@@ -2,7 +2,7 @@
 
 Built-in language definitions are embedded as a constant. On first access
 the registry loads the bundled defaults, then merges any user overlay
-found at ``.ariadne/languages.toml`` relative to the current working
+found at ``.graphician/languages.toml`` relative to the current working
 directory.
 
 TOML schema:
@@ -39,7 +39,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-CONFIG_RELATIVE_PATH = ".ariadne/languages.toml"
+CONFIG_RELATIVE_PATH = ".graphician/languages.toml"
 MAX_CUSTOM_LANGUAGES = 20
 
 # ── Bundled defaults ────────────────────────────────────────────────
@@ -124,15 +124,15 @@ class LanguageDef:
     """Language definition with node types and extensions."""
 
     __slots__ = (
-        "name",
-        "grammar",
-        "extractor",
-        "extensions",
-        "function_node_types",
-        "class_node_types",
-        "import_node_types",
         "call_node_types",
+        "class_node_types",
         "comment",
+        "extensions",
+        "extractor",
+        "function_node_types",
+        "grammar",
+        "import_node_types",
+        "name",
     )
 
     def __init__(
@@ -210,7 +210,7 @@ class LanguageRegistry:
                 sorted_entries = sorted(user_langs.items())
                 for name, entry in sorted_entries[:MAX_CUSTOM_LANGUAGES]:
                     _merge_entry(all_langs, name, entry)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- user-supplied TOML must not crash the registry
                 logger.warning("failed to parse %s: %s", config_path, e)
 
         registry.languages = all_langs

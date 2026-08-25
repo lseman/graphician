@@ -13,11 +13,10 @@ import logging
 import sys
 import time
 from pathlib import Path
-from typing import Any
 
-from ...persistence.store import GraphStore
 from ...extraction.languages import LanguageRegistry
 from ...extraction.pipeline import ExtractionPipeline
+from ...persistence.store import GraphStore
 
 logger = logging.getLogger(__name__)
 
@@ -58,10 +57,9 @@ def _is_relevant_source(file_path: str) -> bool:
 
     # Skip hidden files/directories (except dotfiles that are source)
     for part in path.parts[1:]:  # skip root
-        if part.startswith(".") and part not in (".venv", ".git"):
-            # Allow dotfiles like .eslintrc, .prettierrc but skip .git, .idea
-            if part in IGNORED_DIRS:
-                return False
+        # Allow dotfiles like .eslintrc, .prettierrc but skip .git, .idea
+        if part.startswith(".") and part not in (".venv", ".git") and part in IGNORED_DIRS:
+            return False
 
     return True
 
@@ -97,7 +95,7 @@ def cmd_watch(db_path: str, path: str, interval: int = POLL_INTERVAL) -> None:
     # Initial update to catch up on anything changed while not watching.
     try:
         _run_update(store, pipeline, root)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- initial update must not kill the watcher
         logger.warning("initial update failed for %s: %s", root, e)
 
     # Try OS-level file watching first.
@@ -151,8 +149,8 @@ def _run_update(
 
 
 def _watch_event_driven(
-    store: "GraphStore",
-    pipeline: "ExtractionPipeline",
+    store: GraphStore,
+    pipeline: ExtractionPipeline,
     root: Path,
 ) -> bool:
     """Try OS-level file watching. Returns True if successful."""
@@ -175,7 +173,7 @@ def _watch_event_driven(
             file=sys.stderr,
         )
 
-        for change_type, file_path in watchfiles.awatch(
+        for _change_type, file_path in watchfiles.awatch(
             str(root),
             watch_filter=watchfiles.filters.PythonFilter(),
             stop_event=None,
@@ -197,7 +195,7 @@ def _watch_event_driven(
 
             try:
                 _run_update(store, pipeline, root)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- one failed update must not kill the watcher
                 logger.warning("update failed for %s: %s", file_path, e)
 
     except ImportError:
@@ -205,7 +203,7 @@ def _watch_event_driven(
         return False
     except KeyboardInterrupt:
         raise
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- OS watcher backend raises implementation-specific errors
         logger.warning("OS watcher failed (%s); falling back to polling", e)
         return False
 
@@ -213,8 +211,8 @@ def _watch_event_driven(
 
 
 def _watch_polling(
-    store: "GraphStore",
-    pipeline: "ExtractionPipeline",
+    store: GraphStore,
+    pipeline: ExtractionPipeline,
     root: Path,
     interval: int,
 ) -> None:
@@ -262,7 +260,7 @@ def _watch_polling(
             if changed:
                 try:
                     _run_update(store, pipeline, root)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 -- one failed update must not kill the watcher
                     logger.warning("update failed: %s", e)
 
     except KeyboardInterrupt:

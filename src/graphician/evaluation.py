@@ -84,7 +84,7 @@ def run_eval(
     results: list[dict[str, Any]] = []
     for config in configs:
         repo_root = _repo_root(config)
-        db_path = repo_root / "ariadne.db"
+        db_path = repo_root / "graphician.db"
         if not db_path.exists():
             continue
         with GraphStore(db_path) as store:
@@ -647,7 +647,7 @@ def _impact_accuracy_learned(
         return [{"_aggregate": True, "error": "git log failed", "mode": "learned"}]
 
     content = result.stdout
-    lines = [l.strip() for l in content.splitlines() if l.strip()]
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
 
     # Parse commits: blank line separates commits
     commits: list[list[str]] = []
@@ -709,10 +709,10 @@ def _impact_accuracy_learned(
             edge_stats[kind][1] += 1  # cochanged
 
     # Bayesian shrinkage estimation
-    PRIOR_STRENGTH = 20.0  # virtual prior observations
-    DEFAULT_RATE = 0.1  # prior rate
-    MIN_COST = 0.1
-    MAX_COST = 10.0
+    PRIOR_STRENGTH = 20.0  # noqa: N806 -- virtual prior observations
+    DEFAULT_RATE = 0.1  # noqa: N806 -- prior rate
+    MIN_COST = 0.1  # noqa: N806
+    MAX_COST = 10.0  # noqa: N806
 
     learned_costs: dict[str, float] = {}
     for kind, (total, cochanged) in edge_stats.items():
@@ -752,12 +752,11 @@ def _graph_coverage(_repo: Path, store: GraphStore, _config: dict[str, Any]) -> 
 
     Measures how well the graph captures all code elements by language and role.
     """
-    from ..core.node import NodeKind
 
     graph = store.load_graph()
     stats: dict[str, dict[str, int]] = {}
 
-    for nid, node in graph.nodes():
+    for _nid, node in graph.nodes():
         ext = "unknown"
         if node.source_uri:
             ext = Path(node.source_uri).suffix.lstrip(".") or "unknown"

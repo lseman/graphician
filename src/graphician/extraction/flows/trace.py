@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import Any
 
 from ...core.edge import EdgeKind
-from ...core.id import NodeId
 from ...core.node import Node
 
 

@@ -15,7 +15,6 @@ from .types import (
     RenameStats,
 )
 
-
 # ── Rename Preview ────────────────────────────────────────────────────────
 
 
@@ -86,21 +85,24 @@ def rename_preview(graph: Graph, qname: str, new_name: str) -> RenamePreview | N
                 ))
 
     # 4. Where target references others — check for bare-name refs
-    for _, src, dst, edge in graph.edges():
+    for _, src, dst, _edge in graph.edges():
         if src == target_id and dst != target_id:
             dst_node = graph.node(dst)
-            if dst_node and target_node.name in dst_node.name:
-                if new_name not in dst_node.qualified_name:
-                    key = (dst_node.source_uri, dst_node.line_start)
-                    if key not in seen_keys:
-                        seen_keys.add(key)
-                        edits.append(RenameEdit(
-                            file=key[0],
-                            line=key[1],
-                            old=target_node.name,
-                            new=new_name,
-                            confidence=Confidence.MEDIUM,
-                        ))
+            if (
+                dst_node
+                and target_node.name in dst_node.name
+                and new_name not in dst_node.qualified_name
+            ):
+                key = (dst_node.source_uri, dst_node.line_start)
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    edits.append(RenameEdit(
+                        file=key[0],
+                        line=key[1],
+                        old=target_node.name,
+                        new=new_name,
+                        confidence=Confidence.MEDIUM,
+                    ))
 
     stats = RenameStats.from_edits(edits)
 
@@ -139,20 +141,14 @@ def is_entry_point(node: Node, patterns: list[str] | None = None) -> bool:
     if patterns is None:
         patterns = _ENTRY_POINT_PATTERNS
     name = node.name
-    for pattern in patterns:
-        if name == pattern or name.endswith(pattern):
-            return True
-    return False
+    return any(name == pattern or name.endswith(pattern) for pattern in patterns)
 
 
 def is_framework_inherited(node: Node, inherited_classes: set[NodeId]) -> bool:
     """Check if a class inherits from framework base classes."""
     # Check if this node is referenced by INHERITS/IMPLEMENTS edges
     # (we check this externally; here we just check name suffixes)
-    for suffix in _FRAMEWORK_SUFFIXES:
-        if node.name.endswith(suffix):
-            return True
-    return False
+    return any(node.name.endswith(suffix) for suffix in _FRAMEWORK_SUFFIXES)
 
 
 def is_test_file(node: Node) -> bool:

@@ -54,7 +54,7 @@ def extract_pyproject_toml(path: Path, graph: Graph) -> dict[str, Any]:
 
     try:
         data = tomllib.loads(content)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- malformed pyproject.toml must not crash extraction
         logger.warning("Could not parse pyproject.toml at %s: %s", path, e)
         return {"error": str(e), "extracted": 0}
 

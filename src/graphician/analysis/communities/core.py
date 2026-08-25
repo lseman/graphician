@@ -8,13 +8,11 @@ and relabeling helpers.
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from ...core.edge import Confidence, EdgeKind
 from ...core.graph import Graph
 from ...core.id import NodeId
-
 
 # ── Options ──────────────────────────────────────────────────────────
 
@@ -75,7 +73,7 @@ class WorkingGraph:
     Mirrors Rust ``WorkingGraph`` (mod.rs:28-46).
     """
 
-    __slots__ = ("members", "adj", "self_loop", "degree", "total_weight")
+    __slots__ = ("adj", "degree", "members", "self_loop", "total_weight")
 
     def __init__(
         self,
@@ -92,7 +90,7 @@ class WorkingGraph:
         self.total_weight = total_weight
 
     @classmethod
-    def from_graph(cls, graph: Graph) -> "WorkingGraph":
+    def from_graph(cls, graph: Graph) -> WorkingGraph:
         """Build a WorkingGraph from the code graph.
 
         Mirrors Rust ``WorkingGraph::from_graph`` (mod.rs:48-97).
@@ -166,11 +164,11 @@ def densify(labels: list[int]) -> list[int]:
     mapping: dict[int, int] = {}
     next_id = 0
     result: list[int] = []
-    for l in labels:
-        if l not in mapping:
-            mapping[l] = next_id
+    for label in labels:
+        if label not in mapping:
+            mapping[label] = next_id
             next_id += 1
-        result.append(mapping[l])
+        result.append(mapping[label])
     return result
 
 
@@ -182,11 +180,11 @@ def relabel(labels: dict) -> dict:
     mapping: dict[int, int] = {}
     next_id = 0
     result: dict = {}
-    for nid, l in labels.items():
-        if l not in mapping:
-            mapping[l] = next_id
+    for nid, label in labels.items():
+        if label not in mapping:
+            mapping[label] = next_id
             next_id += 1
-        result[nid] = mapping[l]
+        result[nid] = mapping[label]
     return result
 
 

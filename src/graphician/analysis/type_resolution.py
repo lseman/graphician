@@ -14,11 +14,7 @@ matching the project's conservative-resolution philosophy used by
 
 from __future__ import annotations
 
-from collections import defaultdict
-
 from ..core.graph import Graph
-from ..core.id import NodeId
-from ..core.node import NodeKind
 
 
 def resolve_type_placeholders(graph: Graph) -> int:
@@ -31,36 +27,3 @@ def resolve_type_placeholders(graph: Graph) -> int:
     from ..extraction.type_resolution import resolve_type_placeholders as resolve
 
     return resolve(graph)
-
-
-def build_real_type_by_name(graph: Graph) -> dict[str, list[int]]:
-    """Map bare type name → every non-placeholder Class/Trait node."""
-    by_name: dict[str, list[int]] = defaultdict(list)
-    for nid, node in graph.nodes():
-        if (
-            node.kind in (NodeKind.CLASS, NodeKind.TRAIT)
-            and not node.qualified_name.startswith("type::")
-        ):
-            by_name[node.name].append(nid.value)
-    return dict(by_name)
-
-
-def has_no_edges(graph: Graph, node_id: int) -> bool:
-    """Check if a node has no incoming or outgoing edges."""
-    try:
-        for _ in graph.in_neighbors(NodeId(node_id)):
-            return False
-        for _ in graph.out_neighbors(NodeId(node_id)):
-            return False
-    except Exception:
-        pass
-    return True
-
-
-def iter_edges(graph: Graph):
-    """Iterate over all edges as (src_id, dst_id, edge)."""
-    try:
-        for edge_id, src, dst, edge in graph.edges():
-            yield edge_id, src.value, dst.value, edge
-    except Exception:
-        yield from []

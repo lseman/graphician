@@ -198,7 +198,7 @@ def _refinement_local_move_csr(
             u = order[k]
             current = comm[u]
             nd = degree[u]
-            nm = comm_size[current]  # node mass (size of community u was in)
+            comm_size[current]  # node mass (size of community u was in)
             if nd == 0.0:
                 continue
 
@@ -388,11 +388,11 @@ def _random_walk_init_csr(
 
     # LCG state (same as Rust's LcgRng)
     state = np.uint64(rng_seed) if rng_seed > 0 else np.uint64(0x5DEECE66D)
-    LCG_A = np.uint64(6364136223846793005)
-    LCG_C = np.uint64(1)
-    MASK = np.uint64(0xFFFFFFFFFFFFFFFF)
-    SCALE = np.uint64(0x1FFFFF)  # 21 bits = 2097151
-    SCALE_F = 2097152.0  # 2^21 as float
+    LCG_A = np.uint64(6364136223846793005)  # noqa: N806
+    LCG_C = np.uint64(1)  # noqa: N806
+    MASK = np.uint64(0xFFFFFFFFFFFFFFFF)  # noqa: N806
+    SCALE = np.uint64(0x1FFFFF)  # noqa: N806 -- 21 bits = 2097151
+    SCALE_F = 2097152.0  # noqa: N806 -- 2^21 as float
 
     # Run random walks
     for _walk in range(walk_count):

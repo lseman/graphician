@@ -25,33 +25,9 @@ def default_ignored_name(name: str) -> bool:
         return True
 
     # Common build and artifact directories
-    if name in (
-        "target",
-        "node_modules",
-        "__pycache__",
-        ".venv",
-        "venv",
-        "env",
-        ".env",
-        "build",
-        "dist",
-        "out",
-        "bin",
-        "obj",
-        ".next",
-        ".nuxt",
-        ".svelte-kit",
-        ".cache",
-        ".tox",
-        ".mypy_cache",
-        ".pytest_cache",
-        ".ruff_cache",
-        ".eggs",
-        ".egg-info",
-        ".git",
-        ".hg",
-        ".svn",
-    ):
-        return True
-
-    return False
+    return name in (
+        "target", "node_modules", "__pycache__", ".venv", "venv", "env",
+        ".env", "build", "dist", "out", "bin", "obj", ".next", ".nuxt",
+        ".svelte-kit", ".cache", ".tox", ".mypy_cache", ".pytest_cache",
+        ".ruff_cache", ".eggs", ".egg-info", ".git", ".hg", ".svn",
+    )

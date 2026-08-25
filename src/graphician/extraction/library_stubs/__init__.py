@@ -33,7 +33,6 @@ from ._python_stubs import _PYTHON_STUBS
 from ._receiver_hints import _RECEIVER_HINTS, get_method_disambiguation
 from ._rust_stubs import _RUST_STUBS
 
-
 # ── Stub lookup builder ──────────────────────────────────────────────────
 
 def _build_stub_lookup() -> dict[str, list[tuple[str, str]]]:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import gc
 import sqlite3
 import warnings
+from typing import ClassVar
 
 import pytest
 
@@ -192,8 +193,8 @@ class _Response:
 
 
 class _Client:
-    responses = []
-    requests = []
+    responses: ClassVar[list] = []
+    requests: ClassVar[list] = []
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs

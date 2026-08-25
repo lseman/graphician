@@ -167,7 +167,7 @@ def _weighted_pagerank(
             damping, iterations, personalization_vec,
         )
         return {node_list[i]: float(ranks_arr[i]) for i in range(n)}
-    except Exception:
+    except Exception:  # noqa: BLE001 -- native/numba backend raises implementation-specific errors
         # Fallback to pure Python
         pass
 

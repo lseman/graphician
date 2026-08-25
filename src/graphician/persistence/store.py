@@ -8,10 +8,12 @@ and confidence class tracking.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import sqlite3
 from dataclasses import dataclass
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -1075,7 +1077,7 @@ class GraphStore:
                 "LIMIT ?"
             )
             rows = self._conn.execute(sql, (safe_query, limit)).fetchall()
-        except Exception:
+        except Exception:  # noqa: BLE001 -- FTS5 MATCH syntax errors vary by query content
             return []
 
         results: list[tuple[str, float]] = []
@@ -1388,7 +1390,7 @@ class GraphStore:
         if stats is None or stats[0] == 0:
             return []
 
-        count, model = stats
+        _count, model = stats
         model = model or DEFAULT_EMBEDDING_MODEL
 
         # Build query embedding using the same model
@@ -1506,7 +1508,7 @@ class GraphStore:
             )
             try:
                 vec = external_embedding_from_config(ext_config, text)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- external embedding API raises varied errors
                 logger.warning("failed to embed %s: %s", row["qualified_name"], e)
                 continue
             if len(vec) != ext_config.dimension:
@@ -1577,10 +1579,8 @@ class GraphStore:
         Callers should still use ``with GraphStore(...)`` or ``close()``;
         this prevents SQLite connections from leaking when ownership is lost.
         """
-        try:
+        with contextlib.suppress(Exception):
             self.close()
-        except Exception:
-            pass
 
     def __enter__(self) -> GraphStore:
         return self
@@ -1598,14 +1598,14 @@ class GraphStore:
 
 def _now_iso() -> str:
     """Get current time as ISO string."""
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).isoformat()
+    from datetime import datetime
+    return datetime.now(UTC).isoformat()
 
 
 def _now_unix() -> int:
     """Get current time as Unix timestamp."""
-    from datetime import datetime, timezone
-    return int(datetime.now(timezone.utc).timestamp())
+    from datetime import datetime
+    return int(datetime.now(UTC).timestamp())
 
 
 def _confidence_class_name(confidence: Confidence) -> str:

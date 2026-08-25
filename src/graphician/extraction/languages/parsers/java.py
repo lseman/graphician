@@ -112,8 +112,8 @@ def extract_file(
         raw = f.read()
     source = raw.decode("utf-8", errors="replace")
 
-    language = tree_sitter_java.language()
-    lang = tree_sitter_java.language()
+    tree_sitter_java.language()
+    tree_sitter_java.language()
     parser = ts.Parser(ts.Language(tree_sitter_java.language()))
     tree = parser.parse(raw)
     root = tree.root_node
@@ -176,7 +176,7 @@ def _handle_class(
         return
 
     name = _text(name_node)
-    child_scope = scope + [name]
+    child_scope = [*scope, name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
     annotations = _extract_annotations(node, source)
@@ -193,10 +193,7 @@ def _handle_class(
     superclass = node.child_by_field_name("superclass")
     if superclass:
         type_node = superclass.child_by_field_name("type")
-        if type_node:
-            super_name = _text(type_node)
-        else:
-            super_name = _text(superclass)
+        super_name = _text(type_node) if type_node else _text(superclass)
         super_qn = f"type::{super_name}"
         super_id = _add_node(graph, NodeKind.CLASS, super_qn, Path(""), 0, 0)
         graph.add_edge(class_id, super_id, Edge.extracted(EdgeKind.INHERITS))
@@ -231,7 +228,7 @@ def _handle_interface(
         return
 
     name = _text(name_node)
-    child_scope = scope + [name]
+    child_scope = [*scope, name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
     annotations = _extract_annotations(node, source)
@@ -275,7 +272,7 @@ def _handle_method(
         return
 
     name = _text(name_node)
-    child_scope = scope + [name]
+    child_scope = [*scope, name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
     annotations = _extract_annotations(node, source)

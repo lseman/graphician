@@ -7,13 +7,11 @@ delegated to the markdown mention resolver for consistency.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from ...core.edge import Edge, EdgeKind
 from ...core.graph import Graph
-from ...core.id import NodeId
 from ...core.node import Node, NodeKind
 
 

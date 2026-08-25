@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from .types import PatternCategory, FrameworkPattern, PatternMatch
 from .builtin import built_in_patterns
-from .matcher import detect_patterns, _match_pattern
+from .matcher import _match_pattern, detect_patterns
+from .types import FrameworkPattern, PatternCategory, PatternMatch
 
 __all__ = [
-    "PatternCategory",
     "FrameworkPattern",
+    "PatternCategory",
     "PatternMatch",
-    "detect_patterns",
-    "built_in_patterns",
     "_match_pattern",
+    "built_in_patterns",
+    "detect_patterns",
 ]

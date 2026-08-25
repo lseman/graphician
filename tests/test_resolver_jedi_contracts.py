@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from graphician.core import Edge, EdgeKind, Graph, Node, NodeKind
 from graphician.extraction.jedi import enrich_jedi_calls
 from graphician.extraction.jedi.parse import parse_jedi_results

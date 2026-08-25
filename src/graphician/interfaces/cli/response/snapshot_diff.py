@@ -67,7 +67,7 @@ def snapshot_diff_json(db_path: str, head_db: str, top: int = 50) -> dict[str, A
                 "community_changes": len(result.get("community_changes", [])),
             },
         }
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- snapshot diff must return an error, not crash
         logger.warning("snapshot_diff failed: %s", e)
         return {
             "operation": "snapshot_diff",

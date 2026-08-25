@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class Confidence(str, Enum):
+class Confidence(StrEnum):
     """Confidence level for a rename edit."""
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
 
     @classmethod
-    def from_str(cls, value: str) -> "Confidence":
+    def from_str(cls, value: str) -> Confidence:
         """Convert string to Confidence enum."""
         for c in cls:
             if c.value == value:
@@ -41,7 +41,7 @@ class RenameStats:
     total: int = 0
 
     @classmethod
-    def from_edits(cls, edits: list[RenameEdit]) -> "RenameStats":
+    def from_edits(cls, edits: list[RenameEdit]) -> RenameStats:
         """Compute stats from a list of edits."""
         stats = cls()
         for edit in edits:

@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 
 try:
-    from numba import njit, prange, float64, int32, int64, intp
+    from numba import njit, prange
     _HAS_NUMBA = True
 except ImportError:
     _HAS_NUMBA = False
@@ -65,7 +65,6 @@ def _betweenness_bfs_csr(
 
     # Store predecessors using a flat array + offsets approach
     # Pre-allocate max possible (each node can have at most n predecessors)
-    max_preds = n
     pred_starts = np.zeros(n, dtype=np.int32)
     pred_counts = np.zeros(n, dtype=np.int32)
 
@@ -141,10 +140,8 @@ def _betweenness_accumulate(
         order = np.zeros(n, dtype=np.int32)
         order_count = 0
 
-        # Predecessors: use flat array with offsets
-        pred_count = np.zeros(n, dtype=np.int32)
-        # We can't dynamically grow arrays in numba, so use a fixed buffer
-        pred_buffer = np.zeros(n * n, dtype=np.int32)  # worst case
+        path_count = np.zeros(n, dtype=np.float64)
+        path_count[source] = 1.0
 
         while head < tail:
             node = queue[head]
@@ -158,29 +155,21 @@ def _betweenness_accumulate(
                 neighbor = col_idx[e]
                 if dist[neighbor] == -1:
                     dist[neighbor] = next_dist
-                    pred_count[neighbor] = 0
                     queue[tail] = neighbor
                     tail += 1
-                elif dist[neighbor] == next_dist:
-                    pass
-
-        # Second pass: collect predecessors
-        # (Need to re-traverse to build pred lists)
-        pred_start = np.zeros(n, dtype=np.int32)
-        for i in range(n):
-            count = pred_count[i]
-            if count > 0:
-                pred_start[i] = i  # Use index as start (simplified)
-            else:
-                pred_start[i] = -1
+                if dist[neighbor] == next_dist:
+                    path_count[neighbor] += path_count[node]
 
         # Dependency accumulation
         dependency = np.zeros(n, dtype=np.float64)
         for i in range(order_count - 1, -1, -1):
             node = order[i]
-            coeff = (1.0 + dependency[node]) / max(pred_count[node], 1)
-            # Add contribution to predecessors
-            # (Simplified: skip actual pred list traversal for now)
+            if path_count[node] > 0.0:
+                coeff = (1.0 + dependency[node]) / path_count[node]
+                for e in range(row_ptr[node], row_ptr[node + 1]):
+                    predecessor = col_idx[e]
+                    if dist[predecessor] == dist[node] - 1:
+                        dependency[predecessor] += path_count[predecessor] * coeff
             if node != source:
                 scores[node] += dependency[node]
 

@@ -310,6 +310,7 @@ def extract_data_flow(
     function_id: NodeId,
     source_text: str,
     params: list[str] | None = None,
+    source_path: str = "",
 ) -> int:
     """Extract data flow edges from a function/method body using Rust.
 
@@ -330,7 +331,7 @@ def extract_data_flow(
         from graphician.extraction.data_flow import (
             extract_data_flow as _python_extract,
         )
-        return _python_extract(graph, function_id, source_text, params)
+        return _python_extract(graph, function_id, source_text, params, source_path=source_path)
 
     # Call the Rust data flow extraction
     result = _rust_extract_data_flow(

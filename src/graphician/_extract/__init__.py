@@ -41,12 +41,18 @@ if _lib_path is not None:
     extract_javascript_file = _mod.extract_javascript_file
     extract_java_file = _mod.extract_java_file
     extract_cpp_file = _mod.extract_cpp_file
+    extract_go_file = _mod.extract_go_file
     CommunityOptions = _mod.CommunityOptions
     community_detection_louvain = _mod.community_detection_louvain
     community_detection_leiden = _mod.community_detection_leiden
     community_detection_infomap = _mod.community_detection_infomap
     dedup_candidate_pairs = _mod.dedup_candidate_pairs
     fuzzy_score_matrix = _mod.fuzzy_score_matrix
+    plan_type_resolution = getattr(_mod, "plan_type_resolution", None)
+    plan_call_resolution = getattr(_mod, "plan_call_resolution", None)
+    save_graph_sqlite = getattr(_mod, "save_graph_sqlite", None)
+    save_graph_incremental_sqlite = getattr(_mod, "save_graph_incremental_sqlite", None)
+    load_graph_sqlite = getattr(_mod, "load_graph_sqlite", None)
     NativeGraph = _mod.NativeGraph
     HAS_RUST = True
 else:
@@ -59,12 +65,18 @@ else:
     extract_javascript_file = None
     extract_java_file = None
     extract_cpp_file = None
+    extract_go_file = None
     CommunityOptions = None
     community_detection_louvain = None
     community_detection_leiden = None
     community_detection_infomap = None
     dedup_candidate_pairs = None
     fuzzy_score_matrix = None
+    plan_type_resolution = None
+    plan_call_resolution = None
+    save_graph_sqlite = None
+    save_graph_incremental_sqlite = None
+    load_graph_sqlite = None
     NativeGraph = None
 
     def available() -> bool:
@@ -83,12 +95,18 @@ __all__ = [
     "extract_javascript_file",
     "extract_java_file",
     "extract_cpp_file",
+    "extract_go_file",
     "CommunityOptions",
     "community_detection_louvain",
     "community_detection_leiden",
     "community_detection_infomap",
     "dedup_candidate_pairs",
     "fuzzy_score_matrix",
+    "plan_type_resolution",
+    "plan_call_resolution",
+    "save_graph_sqlite",
+    "save_graph_incremental_sqlite",
+    "load_graph_sqlite",
     "NativeGraph",
     "available",
     "version",

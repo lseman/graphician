@@ -161,7 +161,7 @@ fn walk_scope(
                     properties: vec![("dialect".to_string(), "cpp".to_string())],
                 });
                 result.edges.push(ExtractedEdge {
-                    src_qn: file_qn.to_string(),
+                    src_qn: owner_qn(file_qn, scope),
                     dst_qn: qn.clone(),
                     kind: "defines".to_string(),
                     conf_class: "extracted".to_string(),
@@ -249,7 +249,12 @@ fn walk_scope(
                 }
 
                 result.nodes.push(ExtractedNode {
-                    kind: "function".to_string(),
+                    kind: if has_class_parent(&child) {
+                        "method"
+                    } else {
+                        "function"
+                    }
+                    .to_string(),
                     qualified_name: qn.clone(),
                     name: name.clone(),
                     source_uri: Some(file_path.to_string()),
@@ -259,7 +264,7 @@ fn walk_scope(
                     properties: props,
                 });
                 result.edges.push(ExtractedEdge {
-                    src_qn: file_qn.to_string(),
+                    src_qn: owner_qn(file_qn, scope),
                     dst_qn: qn.clone(),
                     kind: "defines".to_string(),
                     conf_class: "extracted".to_string(),
@@ -305,7 +310,7 @@ fn walk_scope(
                             walk_scope(
                                 &body,
                                 source_str,
-                                &ns_qn,
+                                file_qn,
                                 file_path,
                                 &child_scope,
                                 file_is_test,
@@ -319,6 +324,28 @@ fn walk_scope(
             _ => {}
         }
     }
+}
+
+fn owner_qn(file_qn: &str, scope: &[String]) -> String {
+    if scope.is_empty() {
+        file_qn.to_string()
+    } else {
+        format!("{}::{}", file_qn, scope.join("::"))
+    }
+}
+
+fn has_class_parent(node: &tree_sitter::Node) -> bool {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if matches!(parent.kind(), "class_specifier" | "struct_specifier") {
+            return true;
+        }
+        if matches!(parent.kind(), "translation_unit" | "namespace_definition") {
+            return false;
+        }
+        current = parent.parent();
+    }
+    false
 }
 
 fn emit_calls(

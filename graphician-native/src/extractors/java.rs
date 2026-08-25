@@ -152,7 +152,7 @@ fn walk_scope(
                     properties: vec![("dialect".to_string(), "java".to_string())],
                 });
                 result.edges.push(ExtractedEdge {
-                    src_qn: file_qn.to_string(),
+                    src_qn: owner_qn(file_qn, scope),
                     dst_qn: qn.clone(),
                     kind: "defines".to_string(),
                     conf_class: "extracted".to_string(),
@@ -269,7 +269,7 @@ fn walk_scope(
                     properties: vec![("dialect".to_string(), "java".to_string())],
                 });
                 result.edges.push(ExtractedEdge {
-                    src_qn: file_qn.to_string(),
+                    src_qn: owner_qn(file_qn, scope),
                     dst_qn: qn.clone(),
                     kind: "defines".to_string(),
                     conf_class: "extracted".to_string(),
@@ -326,7 +326,7 @@ fn walk_scope(
                     properties: props,
                 });
                 result.edges.push(ExtractedEdge {
-                    src_qn: file_qn.to_string(),
+                    src_qn: owner_qn(file_qn, scope),
                     dst_qn: qn.clone(),
                     kind: "defines".to_string(),
                     conf_class: "extracted".to_string(),
@@ -343,6 +343,14 @@ fn walk_scope(
     }
 }
 
+fn owner_qn(file_qn: &str, scope: &[String]) -> String {
+    if scope.is_empty() {
+        file_qn.to_string()
+    } else {
+        format!("{}::{}", file_qn, scope.join("::"))
+    }
+}
+
 fn emit_calls(
     node: &tree_sitter::Node,
     source: &[u8],
@@ -352,15 +360,9 @@ fn emit_calls(
     let mut stack: Vec<tree_sitter::Node> = children(node);
     while let Some(child) = stack.pop() {
         if child.kind() == "method_invocation" || child.kind() == "constructor_invocation" {
-            let mut func_node = None;
-            for c in child.children(&mut child.walk()) {
-                if child.field_name_for_child(c.id() as u32) == Some("name")
-                    || child.field_name_for_child(c.id() as u32) == Some("function")
-                {
-                    func_node = Some(c);
-                    break;
-                }
-            }
+            let func_node = child
+                .child_by_field_name("name")
+                .or_else(|| child.child_by_field_name("function"));
             if let Some(func) = func_node {
                 let mut name = None;
                 match func.kind() {

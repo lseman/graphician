@@ -468,39 +468,141 @@ fn emit_import(
     source: &[u8],
     result: &mut ExtractionResult,
 ) {
+    // Query for various import patterns
     let query = Query::new(
         &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-        r#"(import_statement (string) @path)"#,
+        r#"
+        (import_statement
+            source: (string) @path
+            specifiers: (import_specifier_list)
+        ) @import1
+        (import_statement
+            source: (string) @path2
+        ) @import2
+        (import_statement
+            source: (string) @path3
+            specifiers: (import_clause name: (identifier) @imported_name)
+        ) @import3
+        (import_statement
+            source: (string) @path4
+            specifiers: (named_imports name: (identifier) @imported_name2)
+        ) @import4
+        "#,
     )
     .map_err(|_| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("invalid query"))
-    .unwrap();
+    .ok();
+
+    let Some(query) = query else {
+        return;
+    };
+
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(&query, *node, source);
     while let Some(m) = matches.next() {
         for cap in m.captures {
-            let path_text = text(&cap.node, source);
-            if path_text.is_empty() {
-                continue;
+            let cn = query.capture_names()[cap.index as usize];
+            match cn {
+                "path" | "path2" | "path3" | "path4" => {
+                    let path_text = text(&cap.node, source);
+                    if path_text.is_empty() || path_text.starts_with('"') {
+                        continue;
+                    }
+                    // Extract module name from path (e.g., "@scope/pkg" or "package-name")
+                    let mod_name = path_text.trim_matches('"');
+                    let mod_qn = format!("module::{}", mod_name);
+                    if !result.nodes.iter().any(|n| n.qualified_name == mod_qn) {
+                        result.nodes.push(ExtractedNode {
+                            kind: "module".to_string(),
+                            qualified_name: mod_qn.clone(),
+                            name: mod_name.to_string(),
+                            source_uri: None,
+                            line_start: 0,
+                            line_end: 0,
+                            source_text: None,
+                            properties: vec![("dialect".to_string(), "typescript".to_string())],
+                        });
+                        result.edges.push(ExtractedEdge {
+                            src_qn: file_qn.to_string(),
+                            dst_qn: mod_qn,
+                            kind: "imports".to_string(),
+                            conf_class: "extracted".to_string(),
+                            confidence: 1.0,
+                            properties: vec![],
+                        });
+                    }
+                }
+                "imported_name" | "imported_name2" => {
+                    // Named import - extract the imported identifier
+                    let imported = text(&cap.node, source);
+                    if !imported.is_empty() {
+                        let var_qn = format!("{}::{}", file_qn, imported);
+                        if !result.nodes.iter().any(|n| n.qualified_name == var_qn) {
+                            result.nodes.push(ExtractedNode {
+                                kind: "variable".to_string(),
+                                qualified_name: var_qn.clone(),
+                                name: imported.clone(),
+                                source_uri: None,
+                                line_start: 0,
+                                line_end: 0,
+                                source_text: None,
+                                properties: vec![("dialect".to_string(), "typescript".to_string())],
+                            });
+                        }
+                    }
+                }
+                _ => {}
             }
-            let mod_qn = format!("module::{}", path_text);
-            result.nodes.push(ExtractedNode {
-                kind: "module".to_string(),
-                qualified_name: mod_qn.clone(),
-                name: path_text,
-                source_uri: None,
-                line_start: 0,
-                line_end: 0,
-                source_text: None,
-                properties: vec![("dialect".to_string(), "typescript".to_string())],
-            });
-            result.edges.push(ExtractedEdge {
-                src_qn: file_qn.to_string(),
-                dst_qn: mod_qn,
-                kind: "imports".to_string(),
-                conf_class: "extracted".to_string(),
-                confidence: 1.0,
-                properties: vec![],
-            });
+        }
+    }
+
+    // Also handle re-exports: export { X } from '...'
+    let export_query = Query::new(
+        &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        r#"
+        (export_statement
+            source: (string) @export_path
+            specifiers: (export_specifier_list)
+        ) @export1
+        "#,
+    )
+    .map_err(|_| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("invalid query"))
+    .ok();
+
+    if let Some(export_query) = export_query {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&export_query, *node, source);
+        while let Some(m) = matches.next() {
+            for cap in m.captures {
+                let cn = export_query.capture_names()[cap.index as usize];
+                if cn == "export_path" {
+                    let path_text = text(&cap.node, source);
+                    if path_text.is_empty() || path_text.starts_with('"') {
+                        continue;
+                    }
+                    let mod_name = path_text.trim_matches('"');
+                    let mod_qn = format!("module::{}", mod_name);
+                    if !result.nodes.iter().any(|n| n.qualified_name == mod_qn) {
+                        result.nodes.push(ExtractedNode {
+                            kind: "module".to_string(),
+                            qualified_name: mod_qn.clone(),
+                            name: mod_name.to_string(),
+                            source_uri: None,
+                            line_start: 0,
+                            line_end: 0,
+                            source_text: None,
+                            properties: vec![("dialect".to_string(), "typescript".to_string())],
+                        });
+                        result.edges.push(ExtractedEdge {
+                            src_qn: file_qn.to_string(),
+                            dst_qn: mod_qn,
+                            kind: "re-exports".to_string(),
+                            conf_class: "extracted".to_string(),
+                            confidence: 1.0,
+                            properties: vec![],
+                        });
+                    }
+                }
+            }
         }
     }
 }
@@ -514,15 +616,9 @@ fn emit_calls(
     let mut stack: Vec<tree_sitter::Node> = children(node);
     while let Some(child) = stack.pop() {
         if child.kind() == "call_expression" {
-            let mut func_node = None;
-            for c in child.children(&mut child.walk()) {
-                if child.field_name_for_child(c.id() as u32) == Some("function")
-                    || child.field_name_for_child(c.id() as u32) == Some("callee")
-                {
-                    func_node = Some(c);
-                    break;
-                }
-            }
+            let func_node = child
+                .child_by_field_name("function")
+                .or_else(|| child.child_by_field_name("callee"));
             if let Some(func) = func_node {
                 let mut name = None;
                 let mut receiver = None;

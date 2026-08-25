@@ -267,7 +267,10 @@ fn emit_method(
     if name.is_empty() {
         return;
     }
-    let qn = format!("{}::{}", parent_qn, name);
+    // The dedicated JavaScript parser keeps methods in the file namespace
+    // while retaining the class -> method Defines edge.
+    let file_qn = parent_qn.split("::").take(2).collect::<Vec<_>>().join("::");
+    let qn = format!("{}::{}", file_qn, name);
     let is_test = file_is_test || is_test_name(&name);
     let start = (node.start_position().row + 1) as usize;
     let end = (node.end_position().row + 1) as usize;
@@ -358,39 +361,93 @@ fn emit_import(
     source: &[u8],
     result: &mut ExtractionResult,
 ) {
-    let query = Query::new(
+    // Query for ESM import statements
+    let esm_query = Query::new(
         &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         r#"(import_statement (string) @path)"#,
     )
     .map_err(|_| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("invalid query"))
-    .unwrap();
-    let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&query, *node, source);
-    while let Some(m) = matches.next() {
-        for cap in m.captures {
-            let path_text = text(&cap.node, source);
-            if path_text.is_empty() {
-                continue;
+    .ok();
+
+    if let Some(query) = esm_query {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&query, *node, source);
+        while let Some(m) = matches.next() {
+            for cap in m.captures {
+                let path_text = text(&cap.node, source);
+                if path_text.is_empty() {
+                    continue;
+                }
+                let mod_qn = format!("module::{}", path_text);
+                if !result.nodes.iter().any(|n| n.qualified_name == mod_qn) {
+                    result.nodes.push(ExtractedNode {
+                        kind: "module".to_string(),
+                        qualified_name: mod_qn.clone(),
+                        name: path_text,
+                        source_uri: None,
+                        line_start: 0,
+                        line_end: 0,
+                        source_text: None,
+                        properties: vec![("dialect".to_string(), "javascript".to_string())],
+                    });
+                    result.edges.push(ExtractedEdge {
+                        src_qn: file_qn.to_string(),
+                        dst_qn: mod_qn,
+                        kind: "imports".to_string(),
+                        conf_class: "extracted".to_string(),
+                        confidence: 1.0,
+                        properties: vec![],
+                    });
+                }
             }
-            let mod_qn = format!("module::{}", path_text);
-            result.nodes.push(ExtractedNode {
-                kind: "module".to_string(),
-                qualified_name: mod_qn.clone(),
-                name: path_text,
-                source_uri: None,
-                line_start: 0,
-                line_end: 0,
-                source_text: None,
-                properties: vec![("dialect".to_string(), "javascript".to_string())],
-            });
-            result.edges.push(ExtractedEdge {
-                src_qn: file_qn.to_string(),
-                dst_qn: mod_qn,
-                kind: "imports".to_string(),
-                conf_class: "extracted".to_string(),
-                confidence: 1.0,
-                properties: vec![],
-            });
+        }
+    }
+
+    // Query for require() calls
+    let require_query = Query::new(
+        &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        r#"(call_expression
+            function: (identifier) @require_fn
+            arguments: (arguments (string) @module_path)
+        )"#,
+    )
+    .map_err(|_| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("invalid query"))
+    .ok();
+
+    if let Some(require_query) = require_query {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&require_query, *node, source);
+        while let Some(m) = matches.next() {
+            for cap in m.captures {
+                let cn = require_query.capture_names()[cap.index as usize];
+                if cn == "module_path" {
+                    let path_text = text(&cap.node, source);
+                    if path_text.is_empty() {
+                        continue;
+                    }
+                    let mod_qn = format!("module::{}", path_text);
+                    if !result.nodes.iter().any(|n| n.qualified_name == mod_qn) {
+                        result.nodes.push(ExtractedNode {
+                            kind: "module".to_string(),
+                            qualified_name: mod_qn.clone(),
+                            name: path_text,
+                            source_uri: None,
+                            line_start: 0,
+                            line_end: 0,
+                            source_text: None,
+                            properties: vec![("dialect".to_string(), "javascript".to_string())],
+                        });
+                        result.edges.push(ExtractedEdge {
+                            src_qn: file_qn.to_string(),
+                            dst_qn: mod_qn,
+                            kind: "imports".to_string(),
+                            conf_class: "extracted".to_string(),
+                            confidence: 1.0,
+                            properties: vec![],
+                        });
+                    }
+                }
+            }
         }
     }
 }
@@ -404,15 +461,9 @@ fn emit_calls(
     let mut stack: Vec<tree_sitter::Node> = children(node);
     while let Some(child) = stack.pop() {
         if child.kind() == "call_expression" {
-            let mut func_node = None;
-            for c in child.children(&mut child.walk()) {
-                if child.field_name_for_child(c.id() as u32) == Some("function")
-                    || child.field_name_for_child(c.id() as u32) == Some("callee")
-                {
-                    func_node = Some(c);
-                    break;
-                }
-            }
+            let func_node = child
+                .child_by_field_name("function")
+                .or_else(|| child.child_by_field_name("callee"));
             if let Some(func) = func_node {
                 let mut name = None;
                 let mut receiver = None;

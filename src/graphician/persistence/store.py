@@ -15,6 +15,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .._extract import (
+    load_graph_sqlite,
+    save_graph_incremental_sqlite,
+    save_graph_sqlite,
+)
 from ..core.edge import Confidence, Edge, EdgeKind
 from ..core.graph import Graph
 from ..core.id import NodeId
@@ -223,26 +228,86 @@ class GraphStore:
         """
         logger.info("Saving graph with %d nodes, %d edges", graph.node_count(), graph.edge_count())
 
+        if self._native_sqlite_available(save_graph_sqlite) and not self._has_embeddings():
+            try:
+                self._save_graph_native(graph, file_hashes)
+                return
+            except Exception:
+                logger.warning("Native graph save failed; using Python fallback", exc_info=True)
+
         with self._conn:
             # Clear existing data
             self._conn.execute("DELETE FROM edges")
             self._conn.execute("DELETE FROM nodes")
 
-            # Insert nodes, build qname → db_id mapping
-            qname_to_db_id: dict[str, int] = {}
-            for nid, node in graph.nodes():
-                db_id = self._insert_node(node)
-                qname_to_db_id[node.qualified_name] = db_id
+            # A full save starts from empty tables, so batch insertion avoids
+            # two SQLite statements per node (INSERT followed by UPDATE).
+            self._conn.executemany(
+                """INSERT INTO nodes
+                   (kind, name, qualified_name, source_uri, line_start, line_end,
+                    properties, source_text, valid_from, valid_to)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (
+                        node.kind.value,
+                        node.name,
+                        node.qualified_name,
+                        node.source_uri,
+                        node.line_start,
+                        node.line_end,
+                        json.dumps(node.properties),
+                        node.source_text,
+                        node.valid_from,
+                        node.valid_to,
+                    )
+                    for _, node in graph.nodes()
+                ],
+            )
+            qname_to_db_id = {
+                str(row["qualified_name"]): int(row["id"])
+                for row in self._conn.execute(
+                    "SELECT id, qualified_name FROM nodes"
+                ).fetchall()
+            }
 
             # Insert edges using qname mapping
-            for eid, src, dst, edge in graph.edges():
+            edge_rows = []
+            for _eid, src, dst, edge in graph.edges():
                 src_node = graph.node(src)
                 dst_node = graph.node(dst)
                 if src_node and dst_node:
                     src_db = qname_to_db_id.get(src_node.qualified_name)
                     dst_db = qname_to_db_id.get(dst_node.qualified_name)
                     if src_db is not None and dst_db is not None:
-                        self._insert_edge(edge, src_db, dst_db)
+                        conf_class = (
+                            edge.confidence.class_name()
+                            if hasattr(edge.confidence, "class_name")
+                            else _confidence_class_name(edge.confidence)
+                        )
+                        conf_score = (
+                            edge.confidence.score()
+                            if hasattr(edge.confidence, "score")
+                            else 1.0
+                        )
+                        edge_rows.append(
+                            (
+                                edge.kind.value,
+                                conf_score,
+                                conf_class,
+                                json.dumps(edge.properties),
+                                edge.valid_from,
+                                edge.valid_to,
+                                src_db,
+                                dst_db,
+                            )
+                        )
+            self._conn.executemany(
+                """INSERT INTO edges
+                   (kind, confidence, conf_class, properties, valid_from,
+                    valid_to, src_id, dst_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                edge_rows,
+            )
 
             # Sync FTS5 index from nodes table
             self._conn.execute("DELETE FROM nodes_fts")
@@ -255,16 +320,80 @@ class GraphStore:
             if file_hashes:
                 self._conn.execute("DELETE FROM file_state")
                 now_unix = int(_now_unix())
-                for path, hash_val in file_hashes.items():
-                    self._conn.execute(
-                        "INSERT OR REPLACE INTO file_state (path, hash, indexed_at_unix) VALUES (?, ?, ?)",
-                        (path, hash_val, now_unix),
-                    )
+                self._conn.executemany(
+                    """INSERT OR REPLACE INTO file_state
+                       (path, hash, indexed_at_unix) VALUES (?, ?, ?)""",
+                    [(path, hash_val, now_unix) for path, hash_val in file_hashes.items()],
+                )
 
             # Update metadata
             self._set_metadata("node_count", str(graph.node_count()))
             self._set_metadata("edge_count", str(graph.edge_count()))
             self._set_metadata("last_updated", _now_iso())
+
+    def _native_sqlite_available(self, operation: Any) -> bool:
+        """Return whether a separate native connection can address this store."""
+        path = str(self.db_path)
+        return operation is not None and path != ":memory:" and not path.startswith("file:")
+
+    def _save_graph_native(
+        self,
+        graph: Graph,
+        file_hashes: dict[str, str] | None,
+    ) -> None:
+        """Serialize the graph once and execute the canonical SQLite transaction in Rust."""
+        if save_graph_sqlite is None:
+            raise RuntimeError("native graph persistence is unavailable")
+        node_rows, edge_rows = self._native_graph_rows(graph)
+        now_iso = _now_iso()
+        save_graph_sqlite(
+            str(self.db_path),
+            node_rows,
+            edge_rows,
+            list(file_hashes.items()) if file_hashes else None,
+            now_iso,
+            int(_now_unix()),
+        )
+
+    def _native_graph_rows(self, graph: Graph) -> tuple[list[Any], list[Any]]:
+        """Normalize Python graph objects for native persistence operations."""
+        node_rows = [
+            (
+                node_id.value,
+                node.kind.value,
+                node.name,
+                node.qualified_name,
+                node.source_uri,
+                node.line_start,
+                node.line_end,
+                json.dumps(node.properties),
+                node.source_text,
+                node.valid_from,
+                node.valid_to,
+            )
+            for node_id, node in graph.nodes()
+        ]
+        edge_rows = []
+        for _edge_id, source, target, edge in graph.edges():
+            if graph.node(source) is None or graph.node(target) is None:
+                continue
+            edge_rows.append(
+                (
+                    source.value,
+                    target.value,
+                    edge.kind.value,
+                    edge.confidence.score(),
+                    _confidence_class_name(edge.confidence),
+                    json.dumps(edge.properties),
+                    edge.valid_from,
+                    edge.valid_to,
+                )
+            )
+        return node_rows, edge_rows
+
+    def _has_embeddings(self) -> bool:
+        row = self._conn.execute("SELECT 1 FROM embeddings LIMIT 1").fetchone()
+        return row is not None
 
     def save_graph_incremental(
         self,
@@ -278,6 +407,19 @@ class GraphStore:
         affected nodes. Embeddings from external providers are invalidated for
         changed nodes because rebuilding them may require network access.
         """
+        if (
+            self._native_sqlite_available(save_graph_incremental_sqlite)
+            and not self._has_embeddings()
+        ):
+            try:
+                self._save_graph_incremental_native(graph, file_hashes)
+                return
+            except Exception:
+                logger.warning(
+                    "Native incremental graph save failed; using Python fallback",
+                    exc_info=True,
+                )
+
         existing_nodes = {
             row["qualified_name"]: row
             for row in self._conn.execute("SELECT * FROM nodes").fetchall()
@@ -448,6 +590,24 @@ class GraphStore:
         if embedding_model == DEFAULT_EMBEDDING_MODEL and changed_node_ids:
             self._rebuild_local_embeddings_for_ids(changed_node_ids)
 
+    def _save_graph_incremental_native(
+        self,
+        graph: Graph,
+        file_hashes: dict[str, str] | None,
+    ) -> None:
+        """Apply a stable-ID graph delta through the native SQLite adapter."""
+        if save_graph_incremental_sqlite is None:
+            raise RuntimeError("native incremental persistence is unavailable")
+        node_rows, edge_rows = self._native_graph_rows(graph)
+        save_graph_incremental_sqlite(
+            str(self.db_path),
+            node_rows,
+            edge_rows,
+            list(file_hashes.items()) if file_hashes is not None else None,
+            _now_iso(),
+            int(_now_unix()),
+        )
+
     def _rebuild_local_embeddings_for_ids(self, node_ids: set[int]) -> None:
         """Regenerate local embeddings for the selected persisted nodes."""
         if not node_ids:
@@ -563,6 +723,12 @@ class GraphStore:
 
     def load_graph(self) -> Graph:
         """Load a graph from the database."""
+        if self._native_sqlite_available(load_graph_sqlite):
+            try:
+                return self._load_graph_native()
+            except Exception:
+                logger.warning("Native graph load failed; using Python fallback", exc_info=True)
+
         graph = Graph()
 
         # Load nodes and map database IDs to in-memory IDs.
@@ -582,6 +748,69 @@ class GraphStore:
             if src_id is not None and dst_id is not None:
                 graph.add_edge(src_id, dst_id, edge)
 
+        logger.info("Loaded graph: %d nodes, %d edges", graph.node_count(), graph.edge_count())
+        return graph
+
+    def _load_graph_native(self) -> Graph:
+        """Load canonical SQLite rows in Rust and restore the Python graph interface."""
+        if load_graph_sqlite is None:
+            raise RuntimeError("native graph persistence is unavailable")
+        node_rows, edge_rows = load_graph_sqlite(str(self.db_path))
+        graph = Graph()
+        database_to_id: dict[int, NodeId] = {}
+        for (
+            database_id,
+            kind,
+            name,
+            qualified_name,
+            source_uri,
+            line_start,
+            line_end,
+            properties,
+            source_text,
+            valid_from,
+            valid_to,
+        ) in node_rows:
+            node_id = graph.add_node(
+                Node(
+                    kind=NodeKind(kind),
+                    name=name,
+                    qualified_name=qualified_name,
+                    source_uri=source_uri,
+                    line_start=line_start,
+                    line_end=line_end,
+                    properties=json.loads(properties) if properties else {},
+                    source_text=source_text,
+                    valid_from=valid_from,
+                    valid_to=valid_to,
+                )
+            )
+            database_to_id[database_id] = node_id
+        for (
+            source_database_id,
+            target_database_id,
+            kind,
+            confidence,
+            confidence_class,
+            properties,
+            valid_from,
+            valid_to,
+        ) in edge_rows:
+            source = database_to_id.get(source_database_id)
+            target = database_to_id.get(target_database_id)
+            if source is None or target is None:
+                continue
+            graph.add_edge(
+                source,
+                target,
+                Edge(
+                    kind=EdgeKind(kind),
+                    confidence=parse_confidence(confidence_class, confidence),
+                    properties=json.loads(properties) if properties else {},
+                    valid_from=valid_from,
+                    valid_to=valid_to,
+                ),
+            )
         logger.info("Loaded graph: %d nodes, %d edges", graph.node_count(), graph.edge_count())
         return graph
 

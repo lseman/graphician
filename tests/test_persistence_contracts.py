@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import sqlite3
 import gc
+import sqlite3
 import warnings
 
 import pytest
 
 from graphician.core import Confidence, Edge, EdgeKind, Graph, Node, NodeKind
 from graphician.persistence import embeddings
+from graphician.persistence import store as store_module
 from graphician.persistence.embeddings import ExternalEmbeddingConfig
 from graphician.persistence.fts import FTSIndex, build_fts5_query
 from graphician.persistence.store import (
@@ -43,6 +44,91 @@ def test_graph_store_finalizer_closes_abandoned_connection(tmp_path) -> None:
     assert not [warning for warning in caught if warning.category is ResourceWarning]
 
 
+def test_filesystem_store_native_round_trip_preserves_canonical_contract(tmp_path) -> None:
+    graph = Graph()
+    source = graph.add_node(
+        Node.new(NodeKind.FUNCTION, "app::source")
+        .with_source("src/app.py", 2, 5)
+        .with_source_text("def source(): return target()")
+        .with_property("async", False)
+    )
+    target = graph.add_node(Node.new(NodeKind.FUNCTION, "app::target"))
+    edge = Edge.inferred(EdgeKind.CALLS, 0.7)
+    edge.properties["resolved_from"] = "test"
+    graph.add_edge(source, target, edge)
+
+    with GraphStore(tmp_path / "native.db") as store:
+        store.save_graph(graph, {"src/app.py": "hash"})
+        restored = store.load_graph()
+
+        assert store.get_metadata("node_count") == "2"
+        assert store.get_metadata("edge_count") == "1"
+        assert store.get_file_hashes() == {"src/app.py": "hash"}
+        assert store.fts_search("source", 5)[0][0] == "app::source"
+        restored_source = restored.node(restored.find_by_qname("app::source"))
+        assert restored_source.source_text == "def source(): return target()"
+        restored_edge = next(restored.edges())[3]
+        assert restored_edge.confidence is Confidence.INFERRED
+        assert restored_edge.properties == {"score": 0.7, "resolved_from": "test"}
+
+
+def test_native_store_failure_uses_python_fallback(tmp_path, monkeypatch) -> None:
+    graph = Graph()
+    graph.add_node(Node.new(NodeKind.FUNCTION, "app::fallback"))
+
+    def fail(*_args):
+        raise RuntimeError("native unavailable")
+
+    monkeypatch.setattr(store_module, "save_graph_sqlite", fail)
+    monkeypatch.setattr(store_module, "save_graph_incremental_sqlite", fail)
+    monkeypatch.setattr(store_module, "load_graph_sqlite", fail)
+    with GraphStore(tmp_path / "fallback.db") as store:
+        store.save_graph(graph)
+        graph.add_node(Node.new(NodeKind.CLASS, "app::added"))
+        store.save_graph_incremental(graph)
+        restored = store.load_graph()
+
+    assert restored.find_by_qname("app::fallback") is not None
+    assert restored.find_by_qname("app::added") is not None
+
+
+def test_native_incremental_save_retains_ids_and_refreshes_changed_fts(
+    tmp_path, monkeypatch
+) -> None:
+    initial = Graph()
+    source = initial.add_node(Node.new(NodeKind.FUNCTION, "app::source"))
+    target = initial.add_node(Node.new(NodeKind.FUNCTION, "app::target"))
+    initial.add_edge(source, target, Edge.extracted(EdgeKind.CALLS))
+
+    with GraphStore(tmp_path / "incremental.db") as store:
+        store.save_graph(initial, {"app.py": "old"})
+        before = store._conn.execute(
+            "SELECT n.id, e.id FROM nodes n JOIN edges e ON e.src_id=n.id "
+            "WHERE n.qualified_name='app::source'"
+        ).fetchone()
+        native_incremental = store_module.save_graph_incremental_sqlite
+        dispatches = 0
+
+        def tracked(*args):
+            nonlocal dispatches
+            dispatches += 1
+            return native_incremental(*args)
+
+        monkeypatch.setattr(store_module, "save_graph_incremental_sqlite", tracked)
+        updated = initial.clone()
+        updated.node(updated.find_by_qname("app::source")).name = "renamed_source"
+        store.save_graph_incremental(updated, {"app.py": "new"})
+
+        after = store._conn.execute(
+            "SELECT n.id, e.id FROM nodes n JOIN edges e ON e.src_id=n.id "
+            "WHERE n.qualified_name='app::source'"
+        ).fetchone()
+        assert dispatches == 1
+        assert tuple(after) == tuple(before)
+        assert store.get_file_hashes() == {"app.py": "new"}
+        assert store.fts_search("renamed_source", 5)[0][0] == "app::source"
+
+
 def test_fts_index_supports_crud_safe_search_rebuild_and_optimize() -> None:
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
@@ -68,7 +154,8 @@ def test_fts_index_supports_crud_safe_search_rebuild_and_optimize() -> None:
     assert fts.count("database") == 0
 
     conn.execute(
-        "INSERT INTO nodes VALUES (2, 'function', 'render_page', 'web::render_page', 'HTML response')"
+        "INSERT INTO nodes VALUES "
+        "(2, 'function', 'render_page', 'web::render_page', 'HTML response')"
     )
     fts.rebuild()
     assert fts.search_safe("render-page")[0].qualified_name == "web::render_page"

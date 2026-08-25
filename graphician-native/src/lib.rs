@@ -1,6 +1,7 @@
 //! High-performance Python code extraction using tree-sitter Rust bindings.
 pub mod analysis;
 pub mod graph;
+pub mod persistence;
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -337,27 +338,24 @@ pub fn should_suppress_call_placeholder(name: &str) -> bool {
         lower.as_str(),
         // Python builtins and common constructors.
         "abs" | "all" | "any" | "bool" | "bytes" | "callable"
-            | "dict" | "dir" | "enumerate" | "filter" | "float"
+            | "dict" | "dir" | "enumerate" | "float"
             | "getattr" | "hasattr" | "hash" | "id" | "int" | "isinstance"
-            | "iter" | "len" | "list" | "map" | "max" | "min" | "next"
+            | "iter" | "list" | "max" | "min" | "next"
             | "open" | "print" | "range" | "repr" | "reversed" | "round"
             | "set" | "sorted" | "str" | "sum" | "super" | "tuple"
             | "type" | "vars" | "zip"
-        // Rust/std/common fluent API calls.
-        | "and_then" | "as_bytes" | "as_deref" | "as_ref" | "as_str"
-        | "chars" | "clone" | "cloned" | "clamp" | "collect"
-        | "contains" | "ends_with" | "err" | "expect" | "filter_map"
-        | "flat_map" | "fold" | "from" | "get_mut" | "into"
-        | "into_iter" | "is_empty" | "is_none" | "is_some_and"
+        // Rust/std/common fluent API calls (still suppressed).
+        | "and_then" | "as_bytes" | "as_deref" | "chars"
+        | "clamp" | "ends_with" | "err" | "filter_map"
+        | "flat_map" | "fold" | "get_mut" | "into_iter"
+        | "is_empty" | "is_none" | "is_some_and"
         | "iter_mut" | "lines" | "map_err" | "none" | "ok" | "ok_or"
         | "ok_or_else" | "or_default" | "push_str" | "rsplit" | "some"
-        | "splitn" | "starts_with" | "to_owned" | "to_string"
-        | "to_string_lossy" | "from_str" | "trim" | "unwrap"
-        | "unwrap_or" | "unwrap_or_default" | "unwrap_or_else"
-        | "with_capacity"
+        | "splitn" | "starts_with" | "to_owned"
+        | "to_string_lossy" | "from_str" | "trim" | "with_capacity"
         // std::collections / std::vec methods
-        | "sort_by" | "sort_by_key" | "sort_unstable" | "truncate"
-        | "reserve" | "contains_key" | "concat" | "to_vec"
+        | "truncate"
+        | "reserve" | "concat" | "to_vec"
         // std::io / std::fs methods
         | "read_to_string" | "read_to_end" | "remove_dir_all"
         | "remove_file" | "create_dir_all" | "exists" | "write_all"
@@ -400,8 +398,6 @@ pub fn should_suppress_call_placeholder(name: &str) -> bool {
         // Confidence enum variant leaking as unresolved
         | "inferred"
         // Common graph-library traversal/mutation helpers.
-        | "contains_node" | "edge_indices" | "edge_references"
-        | "edge_weight_mut" | "edges_directed" | "node_indices"
         | "node_weight" | "node_weight_mut"
         // std::fs::DirEntry / std::path methods
         | "to_path_buf" | "is_dir" | "is_file" | "filter_entry"
@@ -447,12 +443,7 @@ pub fn is_generic_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     matches!(
         lower.as_str(),
-        "get"
-            | "find"
-            | "insert"
-            | "remove"
-            | "push"
-            | "pop"
+        "find"
             | "select"
             | "execute"
             | "merge"
@@ -460,11 +451,8 @@ pub fn is_generic_name(name: &str) -> bool {
             | "write"
             | "read"
             | "path"
-            | "add"
             | "string"
-            | "new"
             | "index"
-            | "join"
             | "take"
             | "has"
             | "display"
@@ -1147,7 +1135,7 @@ fn extract_python_files(py: Python, files: &Bound<'_, PyList>) -> PyResult<PyObj
 }
 
 pub mod extractors;
-use extractors::{cpp, java, javascript, rust, typescript};
+use extractors::{cpp, go, java, javascript, rust, typescript};
 
 // ============================================================================
 // Data Flow Edge Extraction
@@ -1572,6 +1560,7 @@ fn graphician_native(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(javascript::extract_javascript_file, m)?)?;
     m.add_function(wrap_pyfunction!(java::extract_java_file, m)?)?;
     m.add_function(wrap_pyfunction!(cpp::extract_cpp_file, m)?)?;
+    m.add_function(wrap_pyfunction!(go::extract_go_file, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
     m.add_function(wrap_pyfunction!(available, m)?)?;
     m.add_function(wrap_pyfunction!(community_detection_louvain, m)?)?;
@@ -1579,6 +1568,20 @@ fn graphician_native(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(community_detection_infomap, m)?)?;
     m.add_function(wrap_pyfunction!(analysis::dedup::dedup_candidate_pairs, m)?)?;
     m.add_function(wrap_pyfunction!(analysis::search::fuzzy_score_matrix, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        analysis::resolution::plan_type_resolution,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        analysis::resolution::plan_call_resolution,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(persistence::save_graph_sqlite, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        persistence::save_graph_incremental_sqlite,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(persistence::load_graph_sqlite, m)?)?;
     m.add_class::<CommunityOptions>()?;
     m.add_class::<graph::NativeGraph>()?;
     m.add(
@@ -1667,7 +1670,7 @@ mod tests {
     #[test]
     fn should_suppress_python_builtins() {
         assert!(should_suppress_call_placeholder("print"));
-        assert!(should_suppress_call_placeholder("len"));
+        // len is no longer suppressed — stub resolution handles it
         assert!(should_suppress_call_placeholder("range"));
         assert!(should_suppress_call_placeholder("super"));
         assert!(should_suppress_call_placeholder("isinstance"));
@@ -1676,9 +1679,7 @@ mod tests {
     #[test]
     fn should_suppress_rust_std() {
         assert!(should_suppress_call_placeholder("and_then"));
-        assert!(should_suppress_call_placeholder("unwrap"));
-        assert!(should_suppress_call_placeholder("collect"));
-        assert!(should_suppress_call_placeholder("to_string"));
+        // unwrap/collect/to_string moved to stub coverage — no longer suppressed
         assert!(should_suppress_call_placeholder("expect"));
     }
 
@@ -1700,11 +1701,10 @@ mod tests {
 
     #[test]
     fn is_generic_name_flags_common_verbs() {
-        assert!(is_generic_name("get"));
+        // get/new removed — stub coverage handles them
         assert!(is_generic_name("execute"));
         assert!(is_generic_name("select"));
         assert!(is_generic_name("merge"));
-        assert!(is_generic_name("new"));
         assert!(is_generic_name("path"));
     }
 
@@ -1716,10 +1716,10 @@ mod tests {
 
     #[test]
     fn combined_suppression_catches_both_tiers() {
-        // Strict list
-        assert!(should_suppress("unwrap"));
-        // Generic name
-        assert!(should_suppress("get"));
+        // Strict list — unwrap/collect no longer suppressed, use and_then
+        assert!(should_suppress("and_then"));
+        // get/new removed from generic name — stub coverage handles them
+        assert!(should_suppress("execute"));
         // Real project function — should NOT be suppressed
         assert!(!should_suppress("login"));
         assert!(!should_suppress("extract_file"));

@@ -91,6 +91,7 @@ pub fn result_to_dict(py: Python, result: &ExtractionResult) -> PyResult<PyObjec
 
 // Language-specific extractors
 pub mod cpp;
+pub mod go;
 pub mod java;
 pub mod javascript;
 pub mod rust;

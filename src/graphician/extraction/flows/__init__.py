@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from ...core.node import NodeKind
-from .types import FlowOptions
 from .entry_points import detect_entry_points
-from .trace import trace_flow, _compute_criticality, _is_test_node
+from .trace import _compute_criticality, _is_test_node, trace_flow
+from .types import FlowOptions
 
 
 def compute_flows(graph, options=None):
@@ -14,14 +14,38 @@ def compute_flows(graph, options=None):
     Returns the number of flows produced.
     """
     from ...core.edge import Edge, EdgeKind
-    from ...core.node import Node, NodeKind
     from ...core.id import NodeId
+    from ...core.node import Node, NodeKind
 
     opts = options or FlowOptions()
     entries = detect_entry_points(graph)
+    native_members = None
+    if graph.node_count() >= 1_000 and len(entries) >= 32:
+        try:
+            from ...analysis.native import native_graph
+
+            snapshot = native_graph(graph)
+            if snapshot is not None:
+                placeholders = [
+                    node_id.value
+                    for node_id, node in graph.nodes()
+                    if node.qualified_name.startswith("call::")
+                ]
+                traced = snapshot.trace_flows(
+                    [entry.value for entry in entries],
+                    placeholders,
+                    opts.max_depth,
+                    opts.max_nodes_per_flow,
+                )
+                native_members = [
+                    [(NodeId(node_id), depth) for node_id, depth in members]
+                    for members in traced
+                ]
+        except (AttributeError, ImportError, RuntimeError, TypeError, ValueError):
+            native_members = None
     produced = 0
 
-    for entry in entries:
+    for entry_index, entry in enumerate(entries):
         entry_node = graph.node(entry)
         if entry_node is None:
             continue
@@ -30,7 +54,11 @@ def compute_flows(graph, options=None):
         entry_name = entry_node.name
         is_test_entry = _is_test_node(entry_node)
 
-        members = trace_flow(graph, entry, opts)
+        members = (
+            native_members[entry_index]
+            if native_members is not None
+            else trace_flow(graph, entry, opts)
+        )
         if len(members) < opts.min_flow_size:
             continue
 

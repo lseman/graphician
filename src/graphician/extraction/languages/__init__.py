@@ -19,6 +19,7 @@ class Language(enum.StrEnum):
     RUST = "rust"
     JAVA = "java"
     CPP = "cpp"
+    GO = "go"
 
 
 @dataclass
@@ -47,6 +48,7 @@ class LanguageRegistry:
     def _register_builtins(self) -> None:
         """Register all built-in language specs."""
         import tree_sitter_cpp as tscpp
+        import tree_sitter_go as tsgo
         import tree_sitter_java as tsjava
         import tree_sitter_javascript as tsjavascript
         import tree_sitter_python as tspython
@@ -113,6 +115,17 @@ class LanguageRegistry:
                 name=Language.CPP,
                 extensions=[".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"],
                 parser_factory=lambda: self._make_parser(tscpp.language()),
+                extract_file=True,
+                extract_functions=True,
+                extract_classes=True,
+                extract_imports=True,
+                extract_calls=True,
+                extract_inheritance=True,
+            ),
+            LanguageSpec(
+                name=Language.GO,
+                extensions=[".go"],
+                parser_factory=lambda: self._make_parser(tsgo.language()),
                 extract_file=True,
                 extract_functions=True,
                 extract_classes=True,

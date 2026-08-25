@@ -7,7 +7,6 @@ emits Package nodes with DependsOn edges.
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Any
 
@@ -27,15 +26,34 @@ def extract_manifest(
     """
     path = Path(path)
     name = path.name.lower()
+    try:
+        source = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as error:
+        return {"error": str(error), "packages": 0, "edges": 0}
+
+    manifest_id = graph.add_node(
+        Node.new(NodeKind.FILE, f"file::{path}")
+        .with_source(str(path), 1, max(1, len(source.splitlines())))
+        .with_source_text(source)
+        .with_property("role", "manifest")
+    )
+    packages_before = {
+        node_id for node_id, node in graph.nodes() if node.kind == NodeKind.PACKAGE
+    }
 
     if name == "package.json":
-        return _extract_package_json(path, graph)
+        result = _extract_package_json(path, graph)
     elif name in ("pyproject.toml", "setup.py", "setup.cfg"):
-        return _extract_pyproject_toml(path, graph)
+        result = _extract_pyproject_toml(path, graph)
     elif name == "cargo.toml":
-        return _extract_cargo_toml(path, graph)
+        result = _extract_cargo_toml(path, graph)
     else:
         return {"error": f"Unsupported manifest: {name}", "packages": 0, "edges": 0}
+
+    for package_id, package_node in graph.nodes():
+        if package_node.kind == NodeKind.PACKAGE and package_id not in packages_before:
+            graph.add_edge(manifest_id, package_id, Edge.extracted(EdgeKind.DEFINES))
+    return result
 
 
 def _add_package_node(graph: Graph, name: str) -> NodeId:
@@ -132,11 +150,10 @@ def _extract_pyproject_toml(
     if isinstance(project, dict):
         own_name = project.get("name")
 
-    if not own_name:
-        if isinstance(tool, dict):
-            poetry = tool.get("poetry", {})
-            if isinstance(poetry, dict):
-                own_name = poetry.get("name")
+    if not own_name and isinstance(tool, dict):
+        poetry = tool.get("poetry", {})
+        if isinstance(poetry, dict):
+            own_name = poetry.get("name")
 
     if not own_name:
         return {"packages": 0, "edges": 0}

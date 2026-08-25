@@ -1,11 +1,9 @@
 """Tests for the type-placeholder resolver."""
 
-import pytest
-
 from graphician.core.edge import Edge, EdgeKind
 from graphician.core.graph import Graph
-from graphician.core.id import NodeId
 from graphician.core.node import Node, NodeKind
+from graphician.extraction import type_resolution as type_resolution_module
 from graphician.extraction.type_resolution import (
     resolve_type_placeholders,
 )
@@ -103,3 +101,54 @@ class TestResolveTypePlaceholders:
         rewired = resolve_type_placeholders(g)
         assert rewired == 0
         assert g.find_by_qname("type::Missing") is not None
+
+    def test_native_plan_matches_python_fallback(self, monkeypatch):
+        def make_graph():
+            graph = Graph()
+            placeholder = graph.add_node(Node.new(NodeKind.CLASS, "type::Gateway"))
+            owner = graph.add_node(Node.new(NodeKind.CLASS, "pkg::Owner"))
+            graph.add_edge(owner, placeholder, Edge.extracted(EdgeKind.IMPLEMENTS))
+            graph.add_node(Node.new(NodeKind.TRAIT, "pkg::Gateway"))
+            ambiguous = graph.add_node(Node.new(NodeKind.CLASS, "type::Base"))
+            graph.add_edge(owner, ambiguous, Edge.extracted(EdgeKind.INHERITS))
+            graph.add_node(Node.new(NodeKind.CLASS, "a::Base"))
+            graph.add_node(Node.new(NodeKind.CLASS, "b::Base"))
+            return graph
+
+        native_graph = make_graph()
+        fallback_graph = make_graph()
+        assert resolve_type_placeholders(native_graph) == 1
+
+        monkeypatch.setattr(type_resolution_module, "plan_type_resolution", None)
+        assert resolve_type_placeholders(fallback_graph) == 1
+
+        def topology(graph):
+            return sorted(
+                (
+                    graph.node(source).qualified_name,
+                    graph.node(target).qualified_name,
+                    edge.kind.value,
+                    edge.confidence.value,
+                )
+                for _, source, target, edge in graph.edges()
+            )
+
+        assert topology(native_graph) == topology(fallback_graph)
+
+    def test_native_failure_uses_python_fallback(self, monkeypatch):
+        graph = Graph()
+        placeholder = graph.add_node(Node.new(NodeKind.CLASS, "type::Base"))
+        owner = graph.add_node(Node.new(NodeKind.CLASS, "pkg::Owner"))
+        graph.add_edge(owner, placeholder, Edge.extracted(EdgeKind.INHERITS))
+        real = graph.add_node(Node.new(NodeKind.CLASS, "pkg::Base"))
+
+        def fail(*_args):
+            raise RuntimeError("native unavailable")
+
+        monkeypatch.setattr(type_resolution_module, "plan_type_resolution", fail)
+
+        assert resolve_type_placeholders(graph) == 1
+        assert any(
+            target == real and edge.kind == EdgeKind.INHERITS
+            for target, edge in graph.out_neighbors(owner)
+        )

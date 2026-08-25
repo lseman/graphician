@@ -75,6 +75,29 @@ def test_graph_coverage_rejects_negative_example_limit() -> None:
         graph_coverage(Graph(), example_limit=-1)
 
 
+def test_graph_coverage_compares_file_nodes_with_build_manifest() -> None:
+    graph = Graph()
+    graph.add_node(
+        Node.new(NodeKind.FILE, "file::src/app.py").with_source(
+            "/repo/src/app.py", 1, 2
+        )
+    )
+
+    result = graph_coverage(
+        graph,
+        expected_files=["src/app.py", "src/missing.py"],
+        example_limit=5,
+    )
+
+    assert result["file_extraction"] == {
+        "covered": 1,
+        "total": 2,
+        "rate": 0.5,
+        "missing_examples": ["src/missing.py"],
+        "manifest_available": True,
+    }
+
+
 def test_coverage_cli_reads_built_database(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -89,3 +112,37 @@ def test_coverage_cli_reads_built_database(
     assert result["operation"] == "coverage"
     assert result["source_location"]["missing_examples"] == []
     assert result["summary"]["nodes"] == 4
+
+
+def test_build_then_coverage_cli_end_to_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "app.py").write_text(
+        "def helper():\n    return 1\n\ndef main():\n    return helper()\n",
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "graphician.db"
+
+    monkeypatch.setattr(
+        sys, "argv", ["graphician", "-d", str(db_path), "build", str(project)]
+    )
+    main()
+    build_output = capsys.readouterr()
+    assert "Built:" in build_output.err
+
+    monkeypatch.setattr(
+        sys, "argv", ["graphician", "-d", str(db_path), "coverage", "--top", "5"]
+    )
+    main()
+    result = json.loads(capsys.readouterr().out)
+
+    assert result["file_extraction"]["rate"] == 1.0
+    assert result["source_location"]["rate"] == 1.0
+    assert result["call_resolution"] == {
+        "resolved": 1,
+        "unresolved": 0,
+        "total": 1,
+        "rate": 1.0,
+    }

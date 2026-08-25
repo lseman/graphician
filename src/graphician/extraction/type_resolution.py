@@ -20,10 +20,15 @@ the project's conservative-resolution philosophy used by
 
 from __future__ import annotations
 
+import logging
+
+from .._extract import plan_type_resolution
 from ..core.edge import Edge, EdgeKind
 from ..core.graph import Graph
 from ..core.id import EdgeId, NodeId
-from ..core.node import Node, NodeKind
+from ..core.node import NodeKind
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_type_placeholders(graph: Graph) -> int:
@@ -31,6 +36,32 @@ def resolve_type_placeholders(graph: Graph) -> int:
 
     Returns the number of edges rewired (not removed).
     """
+    if plan_type_resolution is not None:
+        try:
+            rewires, orphaned = plan_type_resolution(
+                [
+                    (nid.value, node.kind.value, node.name, node.qualified_name)
+                    for nid, node in graph.nodes()
+                ],
+                [
+                    (eid.value, src.value, dst.value, edge.kind.value)
+                    for eid, src, dst, edge in graph.edges()
+                ],
+            )
+            for _edge_id, src, dst, kind in rewires:
+                graph.add_edge(NodeId(src), NodeId(dst), Edge.extracted(EdgeKind(kind)))
+            graph.remove_edges_by_id([EdgeId(edge_id) for edge_id, *_ in rewires])
+            for node_id in orphaned:
+                graph.remove_node(NodeId(node_id))
+            return len(rewires)
+        except Exception:
+            logger.warning("Native type resolution failed; using Python fallback", exc_info=True)
+
+    return _resolve_type_placeholders_python(graph)
+
+
+def _resolve_type_placeholders_python(graph: Graph) -> int:
+    """Reference implementation and fallback for native resolution."""
     by_name = _build_real_type_by_name(graph)
 
     # Collect all type:: placeholders (they are emitted as Class nodes).
@@ -80,7 +111,9 @@ def _build_real_type_by_name(graph: Graph) -> dict[str, list[NodeId]]:
     """Map bare type name → every non-placeholder Class/Trait node with that name."""
     by_name: dict[str, list[NodeId]] = {}
     for nid, node in graph.nodes():
-        if node.kind in (NodeKind.CLASS, NodeKind.TRAIT):
-            if not node.qualified_name.startswith("type::"):
-                by_name.setdefault(node.name, []).append(nid)
+        if (
+            node.kind in (NodeKind.CLASS, NodeKind.TRAIT)
+            and not node.qualified_name.startswith("type::")
+        ):
+            by_name.setdefault(node.name, []).append(nid)
     return by_name

@@ -1,19 +1,25 @@
 """Tests for the 6-tier call-placeholder resolver."""
 
+from pathlib import Path
+
 import pytest
 
 from graphician.core.edge import Edge, EdgeKind
 from graphician.core.graph import Graph
 from graphician.core.id import NodeId
 from graphician.core.node import Node, NodeKind
+from graphician.extraction import call_resolution as call_resolution_module
 from graphician.extraction.call_resolution import (
     _infer_type_from_let_bindings,
     _infer_type_from_receiver_expression,
+    _resolve_call_placeholders_python,
     common_prefix_len,
     module_stem,
     resolve_call_placeholders,
     should_suppress_call_placeholder,
 )
+from graphician.extraction.languages import LanguageRegistry
+from graphician.extraction.pipeline import ExtractionPipeline
 
 
 def _make_fn(graph: Graph, qname: str, uri: str | None = None, line: int = 0) -> NodeId:
@@ -32,13 +38,15 @@ def _make_method(graph: Graph, qname: str, uri: str | None = None) -> NodeId:
 
 class TestSuppression:
     def test_known_builtin_suppressed(self):
-        assert should_suppress_call_placeholder("len")
+        # len, clone, collect were removed from suppression - they now have stub coverage
+        # and should be resolved by the stub resolver instead of being suppressed
+        assert not should_suppress_call_placeholder("len")
+        assert not should_suppress_call_placeholder("clone")
+        assert not should_suppress_call_placeholder("collect")
         assert should_suppress_call_placeholder("to_string_lossy")
         assert should_suppress_call_placeholder("edges_directed")
         assert should_suppress_call_placeholder("unwrap_or")
         assert should_suppress_call_placeholder("printf")
-        assert should_suppress_call_placeholder("clone")
-        assert should_suppress_call_placeholder("collect")
         assert should_suppress_call_placeholder("map_err")
 
     def test_project_name_not_suppressed(self):
@@ -52,12 +60,39 @@ class TestSuppression:
     def test_suppressed_placeholder_is_pruned_from_graph(self):
         graph = Graph()
         caller = _make_fn(graph, "file::caller", "main.py")
-        placeholder = _make_fn(graph, "call::len")
+        # clone, collect, len were removed from suppression (now have stub coverage)
+        placeholder = _make_fn(graph, "call::to_string_lossy")
         graph.add_edge(caller, placeholder, Edge.ambiguous(EdgeKind.CALLS))
 
         assert resolve_call_placeholders(graph) == 0
-        assert graph.find_by_qname("call::len") is None
+        assert graph.find_by_qname("call::to_string_lossy") is None
         assert list(graph.out_neighbors(caller)) == []
+
+    @pytest.mark.parametrize("name", ["get", "load", "parse", "add", "len"])
+    def test_suppressed_name_still_resolves_to_project_definition(self, name):
+        graph = Graph()
+        caller = _make_fn(graph, "file::caller", "main.py")
+        placeholder = _make_fn(graph, f"call::{name}")
+        graph.add_edge(caller, placeholder, Edge.ambiguous(EdgeKind.CALLS))
+        target = _make_fn(graph, f"project::{name}", "main.py")
+
+        assert resolve_call_placeholders(graph) == 1
+        assert [(node_id, edge.kind) for node_id, edge in graph.out_neighbors(caller)] == [
+            (target, EdgeKind.CALLS)
+        ]
+
+    def test_ambiguous_suppressed_name_without_strong_evidence_is_pruned(self):
+        # edges_directed is still suppressed (no stub coverage)
+        # Note: get was removed from suppression (now has stub coverage)
+        graph = Graph()
+        caller = _make_fn(graph, "file::caller", "app/main.py")
+        placeholder = _make_fn(graph, "call::edges_directed")
+        graph.add_edge(caller, placeholder, Edge.ambiguous(EdgeKind.CALLS))
+        _make_fn(graph, "first::edges_directed", "lib/first.py")
+        _make_fn(graph, "second::edges_directed", "vendor/second.py")
+
+        assert resolve_call_placeholders(graph) == 0
+        assert graph.find_by_qname("call::edges_directed") is None
 
 
 class TestHelpers:
@@ -106,6 +141,31 @@ class TestTier1UniqueName:
         g.add_edge(caller, ph, Edge.ambiguous(EdgeKind.CALLS))
         resolved = resolve_call_placeholders(g)
         assert resolved == 0
+
+
+def test_relative_import_and_alias_select_correct_duplicate_definition(tmp_path: Path):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "other").mkdir()
+    (tmp_path / "pkg" / "types.py").write_text("class Choice:\n    pass\n")
+    (tmp_path / "other" / "types.py").write_text("class Choice:\n    pass\n")
+    (tmp_path / "pkg" / "caller.py").write_text(
+        "from .types import Choice as Selected\n"
+        "def choose():\n"
+        "    return Selected()\n"
+    )
+
+    graph = ExtractionPipeline(LanguageRegistry(), strict=True).build(tmp_path)
+    caller = graph.find_by_qname("file::pkg/caller.py::choose")
+    expected = graph.find_by_qname("file::pkg/types.py::Choice")
+    other = graph.find_by_qname("file::other/types.py::Choice")
+
+    assert caller is not None and expected is not None and other is not None
+    targets = [
+        target
+        for target, edge in graph.out_neighbors(caller)
+        if edge.kind == EdgeKind.CALLS
+    ]
+    assert targets == [expected]
 
 
 class TestTier2FileLocal:
@@ -305,3 +365,72 @@ class TestStaleRemoval:
         resolve_call_placeholders(g)
 
         assert g.node(ph) is not None
+
+
+def test_native_resolution_matches_python_fallback_across_tiers():
+    def make_graph():
+        graph = Graph()
+        unique_caller = _make_fn(graph, "app::unique_caller", "src/main.py")
+        unique_placeholder = _make_fn(graph, "call::unique_target")
+        graph.add_edge(
+            unique_caller, unique_placeholder, Edge.ambiguous(EdgeKind.CALLS)
+        )
+        _make_fn(graph, "lib::unique_target", "src/lib.py")
+
+        local_caller = _make_fn(graph, "app::local_caller", "src/local.py")
+        local_placeholder = _make_fn(graph, "call::local_target")
+        graph.add_edge(
+            local_caller, local_placeholder, Edge.ambiguous(EdgeKind.CALLS)
+        )
+        _make_fn(graph, "local::local_target", "src/local.py")
+        _make_fn(graph, "remote::local_target", "other/local.py")
+
+        receiver_node = Node.new(NodeKind.FUNCTION, "app::receiver_caller")
+        receiver_node.with_source("src/receiver.py", 0, 1)
+        receiver_node.with_source_text("store: Store\nstore.persist()")
+        receiver_caller = graph.add_node(receiver_node)
+        receiver_placeholder = _make_fn(graph, "call::persist")
+        receiver_edge = Edge.ambiguous(EdgeKind.CALLS)
+        receiver_edge.properties["call_receiver"] = "store"
+        graph.add_edge(receiver_caller, receiver_placeholder, receiver_edge)
+        _make_method(graph, "types::Store::persist", "types.py")
+        _make_method(graph, "types::Other::persist", "types.py")
+
+        noise_caller = _make_fn(graph, "app::noise", "src/main.py")
+        noise_placeholder = _make_fn(graph, "call::len")
+        graph.add_edge(noise_caller, noise_placeholder, Edge.ambiguous(EdgeKind.CALLS))
+        return graph
+
+    native = make_graph()
+    fallback = make_graph()
+    assert resolve_call_placeholders(native) == 3
+    assert _resolve_call_placeholders_python(fallback) == 3
+
+    def topology(graph):
+        return sorted(
+            (
+                graph.node(source).qualified_name,
+                graph.node(target).qualified_name,
+                edge.kind.value,
+                edge.confidence.value,
+                edge.properties.get("resolved_from"),
+            )
+            for _, source, target, edge in graph.edges()
+        )
+
+    assert topology(native) == topology(fallback)
+
+
+def test_native_resolution_failure_uses_python_fallback(monkeypatch):
+    graph = Graph()
+    caller = _make_fn(graph, "app::caller", "main.py")
+    placeholder = _make_fn(graph, "call::target")
+    graph.add_edge(caller, placeholder, Edge.ambiguous(EdgeKind.CALLS))
+    target = _make_fn(graph, "app::target", "target.py")
+
+    def fail(*_args):
+        raise RuntimeError("native unavailable")
+
+    monkeypatch.setattr(call_resolution_module, "plan_call_resolution", fail)
+    assert resolve_call_placeholders(graph) == 1
+    assert any(node_id == target for node_id, _edge in graph.out_neighbors(caller))

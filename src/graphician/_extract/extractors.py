@@ -16,13 +16,12 @@ from graphician.core.node import Node, NodeKind
 from . import HAS_RUST
 
 if HAS_RUST:
-    from . import (
-        extract_rust_file as _rust_extract_rust,
-        extract_typescript_file as _rust_extract_ts,
-        extract_javascript_file as _rust_extract_js,
-        extract_java_file as _rust_extract_java,
-        extract_cpp_file as _rust_extract_cpp,
-    )
+    from . import extract_cpp_file as _rust_extract_cpp
+    from . import extract_go_file as _rust_extract_go
+    from . import extract_java_file as _rust_extract_java
+    from . import extract_javascript_file as _rust_extract_js
+    from . import extract_rust_file as _rust_extract_rust
+    from . import extract_typescript_file as _rust_extract_ts
 
 
 def _add_node(
@@ -109,6 +108,7 @@ def _extract_file(
             "method": NodeKind.METHOD,
             "trait": NodeKind.TRAIT,
             "type": NodeKind.TYPE,
+            "variable": NodeKind.VARIABLE,
             "module": NodeKind.MODULE,
         }
         kind = kind_map.get(node_data["kind"], NodeKind.FUNCTION)
@@ -118,8 +118,8 @@ def _extract_file(
             kind,
             node_data["qualified_name"],
             record_path,
-            node_data["line_start"],
-            node_data["line_end"],
+            max(0, node_data["line_start"] - 1),
+            max(0, node_data["line_end"] - 1),
             source_text=node_data.get("source_text", ""),
             props=props,
         )
@@ -165,7 +165,7 @@ def _extract_file(
             Path(""),
             0,
             0,
-            props={"dialect": dialect, "role": "call_placeholder"},
+            props={"dialect": dialect},
         )
         edge = Edge.ambiguous(EdgeKind.CALLS)
         if receiver:
@@ -192,7 +192,9 @@ def extract_typescript_file(
     source_path: Path | None = None,
 ) -> None:
     """Parse a TypeScript source file using the Rust-accelerated extractor."""
-    _extract_file(path, graph, "typescript", _rust_extract_ts, file_qn=file_qn, source_path=source_path)
+    _extract_file(
+        path, graph, "typescript", _rust_extract_ts, file_qn=file_qn, source_path=source_path
+    )
 
 
 def extract_javascript_file(
@@ -203,7 +205,9 @@ def extract_javascript_file(
     source_path: Path | None = None,
 ) -> None:
     """Parse a JavaScript source file using the Rust-accelerated extractor."""
-    _extract_file(path, graph, "javascript", _rust_extract_js, file_qn=file_qn, source_path=source_path)
+    _extract_file(
+        path, graph, "javascript", _rust_extract_js, file_qn=file_qn, source_path=source_path
+    )
 
 
 def extract_java_file(
@@ -226,3 +230,14 @@ def extract_cpp_file(
 ) -> None:
     """Parse a C/C++ source file using the Rust-accelerated extractor."""
     _extract_file(path, graph, "cpp", _rust_extract_cpp, file_qn=file_qn, source_path=source_path)
+
+
+def extract_go_file(
+    path: Path,
+    graph: Graph,
+    *,
+    file_qn: str | None = None,
+    source_path: Path | None = None,
+) -> None:
+    """Parse a Go source file using the Rust-accelerated extractor."""
+    _extract_file(path, graph, "go", _rust_extract_go, file_qn=file_qn, source_path=source_path)

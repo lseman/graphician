@@ -12,6 +12,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
@@ -86,19 +87,69 @@ MANIFEST_NAMES = {"package.json", "pyproject.toml", "cargo.toml", "setup.py", "s
 def _dedicated_extractors() -> dict[Language, Any]:
     """Grammar-correct per-language extractors, replacing the generic walker."""
     from .languages.parsers.cpp import extract_file as extract_cpp
+    from .languages.parsers.go import extract_file as extract_go
     from .languages.parsers.java import extract_file as extract_java
     from .languages.parsers.javascript import extract_file as extract_javascript
     from .languages.parsers.python import extract_file as extract_python
     from .languages.parsers.rust import extract_file as extract_rust
     from .languages.parsers.typescript import extract_file as extract_typescript
 
-    return {
+    python_extractors = {
         Language.PYTHON: extract_python,
         Language.JAVASCRIPT: extract_javascript,
         Language.TYPESCRIPT: extract_typescript,
         Language.JAVA: extract_java,
         Language.CPP: extract_cpp,
         Language.RUST: extract_rust,
+        Language.GO: extract_go,
+    }
+
+    if not HAS_RUST or os.environ.get("GRAPHICIAN_NATIVE_EXTRACTORS", "1") == "0":
+        return python_extractors
+
+    from .._extract.extractors import extract_cpp_file as native_cpp
+    from .._extract.extractors import extract_go_file as native_go
+    from .._extract.extractors import extract_java_file as native_java
+    from .._extract.extractors import extract_javascript_file as native_javascript
+    from .._extract.extractors import extract_rust_file as native_rust
+    from .._extract.extractors import extract_typescript_file as native_typescript
+    native_extractors = {
+        Language.JAVASCRIPT: native_javascript,
+        Language.TYPESCRIPT: native_typescript,
+        Language.JAVA: native_java,
+        Language.CPP: native_cpp,
+        Language.RUST: native_rust,
+        Language.GO: native_go,
+    }
+
+    def with_fallback(language: Language):
+        native = native_extractors[language]
+        fallback = python_extractors[language]
+
+        def extract(path, graph, **kwargs):
+            fragment = Graph()
+            try:
+                native(path, fragment, **kwargs)
+            except Exception as exc:
+                logger.warning(
+                    "Native %s extraction failed for %s; using Python fallback: %s",
+                    language.value,
+                    path,
+                    exc,
+                )
+                fallback(path, graph, **kwargs)
+            else:
+                graph.merge(fragment)
+
+        return extract
+
+    return {
+        language: (
+            python_extractors[language]
+            if language is Language.PYTHON
+            else with_fallback(language)
+        )
+        for language in python_extractors
     }
 
 
@@ -158,19 +209,23 @@ class ExtractionPipeline:
                 if line and not line.startswith("#"):
                     ignore_patterns.append(line)
 
-        for path in root.rglob("*"):
-            if not path.is_file():
-                continue
-            relative = path.relative_to(root)
-            if any(
-                any(fnmatch.fnmatch(part, pattern) for pattern in exclude)
-                for part in relative.parts[:-1]
-            ):
-                continue
-            if _is_ignored(relative, ignore_patterns):
-                continue
-            if self.is_supported(path):
-                files.append(path)
+        # Prune default build/dependency directories before descending. Path.rglob
+        # still walks excluded trees such as target/ and node_modules/, which can
+        # dominate discovery time even though none of their files are retained.
+        for directory, dirnames, filenames in os.walk(root, topdown=True):
+            dirnames[:] = [
+                name
+                for name in dirnames
+                if not any(fnmatch.fnmatch(name, pattern) for pattern in exclude)
+            ]
+            directory_path = Path(directory)
+            for filename in filenames:
+                path = directory_path / filename
+                relative = path.relative_to(root)
+                if _is_ignored(relative, ignore_patterns):
+                    continue
+                if self.is_supported(path):
+                    files.append(path)
 
         return sorted(files)
 
@@ -387,8 +442,6 @@ class ExtractionPipeline:
         file_key: str,
     ) -> None:
         """Extract function, class, and type symbols from AST."""
-        import tree_sitter
-
         root = tree.root_node
         self._walk_symbols(root, source, rel_path, spec, file_key, depth=0)
 
@@ -404,8 +457,6 @@ class ExtractionPipeline:
     ) -> None:
         """Recursively walk AST nodes to extract symbols."""
         node_type = node.type
-        source_lines = source.split("\n")
-
         # Determine module path from qualified name
         module_path = self._module_path(rel_path)
 
@@ -585,8 +636,6 @@ class ExtractionPipeline:
 
     def _parse_import_node(self, node: Any, file_key: str) -> None:
         """Parse a Python-style import node."""
-        import tree_sitter
-
         # from X import Y
         if node.type == "import_from_statement":
             module = node.child_by_field_name("module")
@@ -617,7 +666,6 @@ class ExtractionPipeline:
 
     def _parse_ts_import_node(self, node: Any, file_key: str) -> None:
         """Parse a TypeScript/JS import declaration."""
-        source = node.text.decode()
         # Extract module specifier
         for child in node.children:
             if child.type == "string" or child.type == "module_specifier":
@@ -822,7 +870,11 @@ class ExtractionPipeline:
         # against known library type methods (Vec, HashMap, list, dict, etc.)
         stub_stats = resolve_library_stubs_batch(self.graph)
         if stub_stats["resolved"]:
-            logger.info("Library stub resolution: %d resolved, %d remaining", stub_stats["resolved"], stub_stats["unresolved_remaining"])
+            logger.info(
+                "Library stub resolution: %d resolved, %d remaining",
+                stub_stats["resolved"],
+                stub_stats["unresolved_remaining"],
+            )
 
     def _resolve_type_placeholders(self) -> None:
         """Resolve type:: placeholders left by supertype extraction."""
@@ -862,12 +914,12 @@ class ExtractionPipeline:
 
     def _enrich_data_flow(self) -> None:
         functions = [
-            (node_id, node.source_text)
+            (node_id, node.source_text, node.source_uri or "")
             for node_id, node in self.graph.nodes()
             if node.kind in (NodeKind.FUNCTION, NodeKind.METHOD) and node.source_text
         ]
-        for node_id, source_text in functions:
-            extract_data_flow(self.graph, node_id, source_text or "")
+        for node_id, source_text, source_uri in functions:
+            extract_data_flow(self.graph, node_id, source_text or "", source_path=source_uri)
 
     def _derive_tested_by_edges(self) -> None:
         """Reverse every test_fn -[CALLS]-> production_fn edge into a

@@ -495,7 +495,11 @@ def cmd_coverage(args: argparse.Namespace) -> None:
     if args.top < 0:
         raise SystemExit("coverage: --top must be non-negative")
     with _load_store(args) as store:
-        result = graph_coverage(store.load_graph(), example_limit=args.top)
+        result = graph_coverage(
+            store.load_graph(),
+            expected_files=store.get_file_hashes(),
+            example_limit=args.top,
+        )
     print(json.dumps(result, indent=2))
 
 

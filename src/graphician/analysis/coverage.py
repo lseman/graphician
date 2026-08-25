@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -35,13 +36,18 @@ def _is_test(node: Node) -> bool:
 
 
 def _language(source_uri: str | None) -> str:
-    if not source_uri:
+    if not source_uri or source_uri.startswith("<"):
         return "unknown"
     suffix = Path(source_uri).suffix.lower().lstrip(".")
     return suffix or "unknown"
 
 
-def graph_coverage(graph: Graph, *, example_limit: int = 20) -> dict[str, Any]:
+def graph_coverage(
+    graph: Graph,
+    *,
+    expected_files: Iterable[str] | None = None,
+    example_limit: int = 20,
+) -> dict[str, Any]:
     """Measure extraction and relationship coverage for an in-memory graph.
 
     Rates are in ``[0, 1]``. Test coverage means static ``tested_by`` links,
@@ -93,7 +99,27 @@ def graph_coverage(graph: Graph, *, example_limit: int = 20) -> dict[str, Any]:
         for node_id, node in nodes
         if node_id not in connected_ids
     ]
-    files = {node.source_uri for _, node in nodes if node.source_uri}
+    source_files = {
+        node.source_uri.replace("\\", "/").removeprefix("./")
+        for _, node in nodes
+        if node.source_uri and not node.source_uri.startswith("<")
+    }
+    extraction_roots = {NodeKind.FILE, NodeKind.DOCUMENT, NodeKind.DIAGRAM}
+    files = {
+        node.source_uri.replace("\\", "/").removeprefix("./")
+        for _, node in nodes
+        if node.kind in extraction_roots and node.source_uri
+    }
+    expected_file_set = {
+        str(path).replace("\\", "/").removeprefix("./")
+        for path in (expected_files or [])
+    }
+    covered_files = {
+        expected
+        for expected in expected_file_set
+        if expected in files or any(source.endswith(f"/{expected}") for source in files)
+    }
+    missing_files = sorted(expected_file_set - covered_files)
 
     language_counts: dict[str, dict[str, int]] = {}
     for _, node in nodes:
@@ -113,16 +139,15 @@ def graph_coverage(graph: Graph, *, example_limit: int = 20) -> dict[str, Any]:
     source_rate = _rate(len(located_symbols), len(source_symbols))
     connectivity_rate = _rate(len(connected_ids), len(nodes))
     test_link_rate = _rate(tested_production, len(production_callables))
-    health_score = round(
-        (
-            source_rate
-            + connectivity_rate
-            + call_resolution["rate"]
-            + test_link_rate
-        )
-        / 4,
-        4,
-    )
+    health_factors = [
+        source_rate,
+        connectivity_rate,
+        call_resolution["rate"],
+        test_link_rate,
+    ]
+    if expected_file_set:
+        health_factors.append(_rate(len(covered_files), len(expected_file_set)))
+    health_score = round(sum(health_factors) / len(health_factors), 4)
 
     return {
         "operation": "coverage",
@@ -130,13 +155,24 @@ def graph_coverage(graph: Graph, *, example_limit: int = 20) -> dict[str, Any]:
             "health_score": health_score,
             "nodes": len(nodes),
             "edges": len(edges),
-            "source_files": len(files),
+            "source_files": len(source_files),
         },
         "source_location": {
             "covered": len(located_symbols),
             "total": len(source_symbols),
             "rate": source_rate,
             "missing_examples": missing_source,
+        },
+        "file_extraction": {
+            "covered": len(covered_files) if expected_file_set else len(files),
+            "total": len(expected_file_set) if expected_file_set else len(files),
+            "rate": (
+                _rate(len(covered_files), len(expected_file_set))
+                if expected_file_set
+                else (1.0 if files else 0.0)
+            ),
+            "missing_examples": missing_files[:example_limit],
+            "manifest_available": bool(expected_file_set),
         },
         "call_resolution": call_resolution,
         "function_connectivity": {

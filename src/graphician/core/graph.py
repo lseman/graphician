@@ -32,6 +32,19 @@ class Graph:
         self._in: dict[int, list[tuple[int, int]]] = defaultdict(list)  # dst → [(src, edge_id)]
         self._next_node_id: int = 0
         self._next_edge_id: int = 0
+        # Native analysis snapshots are cached by ``analysis.native``.  Keep
+        # the cache opaque here so the core graph does not depend on the
+        # optional extension, while still giving every structural mutation a
+        # cheap and authoritative invalidation token.
+        self._native_revision: int = 0
+        self._native_snapshot: object | None = None
+        self._native_snapshot_key: object | None = None
+
+    def _invalidate_native_snapshot(self) -> None:
+        """Invalidate the optional native analysis snapshot."""
+        self._native_revision += 1
+        self._native_snapshot = None
+        self._native_snapshot_key = None
 
     # ── Node operations ──────────────────────────────────────────────
 
@@ -46,6 +59,7 @@ class Graph:
         self._next_node_id += 1
         self._nodes[idx] = node
         self._by_qname[qn] = idx
+        self._invalidate_native_snapshot()
         return NodeId(idx)
 
     def remove_node(self, id: NodeId) -> None:
@@ -53,6 +67,7 @@ class Graph:
         idx = id.value
         if idx not in self._nodes:
             return
+        self._invalidate_native_snapshot()
         qn = self._nodes[idx].qualified_name
         self._by_qname.pop(qn, None)
 
@@ -89,6 +104,7 @@ class Graph:
 
     def _merge_into(self, loser: int, winner: int) -> NodeId:
         """Rewire loser's edges onto winner, then remove loser."""
+        self._invalidate_native_snapshot()
         incoming: list[tuple[int, int]] = list(self._in.get(loser, []))
         outgoing: list[tuple[int, int]] = list(self._out.get(loser, []))
 
@@ -132,6 +148,7 @@ class Graph:
         self._edges[eid] = (src.value, dst.value, edge)
         self._out[src.value].append((dst.value, eid))
         self._in[dst.value].append((src.value, eid))
+        self._invalidate_native_snapshot()
         return EdgeId(eid)
 
     def remove_edges_by_id(self, ids: list[EdgeId]) -> None:
@@ -139,6 +156,7 @@ class Graph:
         for eid_obj in ids:
             eid = eid_obj.value
             if eid in self._edges:
+                self._invalidate_native_snapshot()
                 src, dst, _ = self._edges[eid]
                 self._out[src] = [(d, e) for d, e in self._out[src] if e != eid]
                 self._in[dst] = [(s, e) for s, e in self._in[dst] if e != eid]
@@ -266,6 +284,7 @@ class Graph:
         eid = id.value
         if eid not in self._edges:
             return
+        self._invalidate_native_snapshot()
         src, dst, _ = self._edges[eid]
         self._out[src] = [(d, e) for d, e in self._out[src] if e != eid]
         self._in[dst] = [(s, e) for s, e in self._in[dst] if e != eid]

@@ -163,9 +163,6 @@ def _emit_calls(
 ) -> None:
     if suppress_types is None:
         suppress_types = ("function_definition", "class_definition")
-    # Import here to avoid circular imports; the set is frozen so
-    # importing from the same module is safe.
-    from ...call_resolution import should_suppress_call_placeholder
     stack = list(node.children)
     while stack:
         child = stack.pop()
@@ -192,7 +189,7 @@ def _emit_calls(
                 obj = func_node.child_by_field_name("object")
                 if obj:
                     receiver = _text(obj, source)
-            if name and not name.startswith("_") and not should_suppress_call_placeholder(name):
+            if name and not name.startswith("_"):
                 callee_qn = f"call::{name}"
                 callee_id = _add_node(graph, NodeKind.FUNCTION, callee_qn, Path(""), 0, 0,
                                       props={"dialect": "python", "role": "call_placeholder"})
@@ -374,10 +371,32 @@ def _emit_imports(
         elif child.type == "import_from_statement":
             module_name = child.child_by_field_name("module_name")
             if module_name:
-                mod_qn = f"module::{_text(module_name, source)}"
+                module_path = _text(module_name, source)
+                imported_symbols: dict[str, str] = {}
+                seen_import = False
+                for imported in child.children:
+                    if imported.type == "import":
+                        seen_import = True
+                        continue
+                    if not seen_import:
+                        continue
+                    if imported.type == "dotted_name":
+                        original = _text(imported, source).rsplit(".", 1)[-1]
+                        imported_symbols[original] = original
+                    elif imported.type == "aliased_import":
+                        alias = imported.child_by_field_name("alias")
+                        name = imported.child_by_field_name("name")
+                        if name is not None:
+                            original = _text(name, source).rsplit(".", 1)[-1]
+                            local_name = _text(alias, source) if alias is not None else original
+                            imported_symbols[local_name] = original
+                mod_qn = f"module::{module_path}"
                 mod_id = _add_node(graph, NodeKind.MODULE, mod_qn, Path(""), 0, 0,
                                    props={"dialect": "python"})
-                graph.add_edge(file_id, mod_id, Edge.extracted(EdgeKind.IMPORTS))
+                import_edge = Edge.extracted(EdgeKind.IMPORTS)
+                import_edge.properties["module_path"] = module_path
+                import_edge.properties["imported_symbols"] = imported_symbols
+                graph.add_edge(file_id, mod_id, import_edge)
 
 
 def extract_file(
@@ -387,7 +406,6 @@ def extract_file(
     with open(path, "rb") as f:
         raw = f.read()
 
-    lang = tree_sitter_python.language()
     parser = ts.Parser(ts.Language(tree_sitter_python.language()))
     tree = parser.parse(raw)
     root = tree.root_node

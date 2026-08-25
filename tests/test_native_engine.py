@@ -13,12 +13,16 @@ from graphician.analysis.communities import quality as community_quality_module
 from graphician.analysis.dedup.minhash import MinHash, shingle
 from graphician.analysis.motifs import engine as motif_engine
 from graphician.analysis.motifs.dsl import Motif
+from graphician.analysis.native import native_graph
 from graphician.analysis.search import search as search_module
 from graphician.analysis.search.fuzzy import _fuzzy_score
 from graphician.core.edge import Edge, EdgeKind
 from graphician.core.graph import Graph
 from graphician.core.node import Node, NodeKind
 from graphician.extraction.data_flow import extract_data_flow as python_extract_data_flow
+from graphician.extraction.flows import compute_flows
+from graphician.extraction.flows.trace import trace_flow
+from graphician.extraction.flows.types import FlowOptions
 from graphician.extraction.library_stubs import resolve_library_stubs
 
 pytestmark = pytest.mark.skipif(not HAS_RUST, reason="Rust extension is not built")
@@ -77,6 +81,42 @@ def test_native_graph_traversal_and_structure_share_snapshot() -> None:
     assert graph.articulation_points() == [2]
 
 
+def test_python_graph_reuses_native_snapshot_until_structural_mutation() -> None:
+    graph = Graph()
+    source = graph.add_node(Node.new(NodeKind.FUNCTION, "app::source"))
+    target = graph.add_node(Node.new(NodeKind.FUNCTION, "app::target"))
+    graph.add_edge(source, target, Edge.extracted(EdgeKind.CALLS))
+
+    first = native_graph(graph)
+    assert first is not None
+    assert native_graph(graph) is first
+
+    added = graph.add_node(Node.new(NodeKind.FUNCTION, "app::added"))
+    graph.add_edge(target, added, Edge.extracted(EdgeKind.CALLS))
+    second = native_graph(graph)
+
+    assert second is not first
+    assert second.traverse(source.value, "calls", max_hops=2) == [target.value, added.value]
+    assert native_graph(graph) is second
+
+
+def test_native_snapshot_detects_direct_edge_state_mutation() -> None:
+    graph = Graph()
+    source = graph.add_node(Node.new(NodeKind.FUNCTION, "app::source"))
+    target = graph.add_node(Node.new(NodeKind.FUNCTION, "app::target"))
+    edge_id = graph.add_edge(source, target, Edge.extracted(EdgeKind.CALLS))
+    first = native_graph(graph)
+    assert first is not None
+
+    edge = graph.edge(edge_id)
+    assert edge is not None
+    edge.confidence = "ambiguous"
+    second = native_graph(graph)
+
+    assert second is not first
+    assert second.paths(source.value, target.value, min_confidence=0.5) == []
+
+
 def test_native_graph_impact_prioritizes_reverse_dependants() -> None:
     graph = NativeGraph(
         [0, 1, 2],
@@ -90,6 +130,85 @@ def test_native_graph_impact_prioritizes_reverse_dependants() -> None:
 
     assert [hit[0] for hit in hits] == [0, 2]
     assert hits[0][1] < hits[1][1]
+
+
+def test_native_batch_flow_trace_matches_python_with_cap_and_placeholders() -> None:
+    graph = Graph()
+    node_ids = [
+        graph.add_node(Node.new(NodeKind.FUNCTION, f"pkg::fn_{index}"))
+        for index in range(12)
+    ]
+    placeholder = graph.add_node(Node.new(NodeKind.FUNCTION, "call::external"))
+    for index in range(11):
+        graph.add_edge(node_ids[index], node_ids[index + 1], Edge.extracted(EdgeKind.CALLS))
+    graph.add_edge(node_ids[0], node_ids[5], Edge.extracted(EdgeKind.CALLS))
+    graph.add_edge(node_ids[0], placeholder, Edge.ambiguous(EdgeKind.CALLS))
+    options = FlowOptions(max_depth=10, max_nodes_per_flow=6)
+
+    expected = trace_flow(graph, node_ids[0], options)
+    snapshot = native_graph(graph)
+    assert snapshot is not None
+    actual = snapshot.trace_flows(
+        [node_ids[0].value],
+        [placeholder.value],
+        options.max_depth,
+        options.max_nodes_per_flow,
+    )[0]
+
+    assert actual == [(node_id.value, depth) for node_id, depth in expected]
+
+
+def test_large_flow_materialization_dispatches_native_with_python_parity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = Graph()
+    for chain in range(32):
+        chain_ids = [
+            graph.add_node(Node.new(NodeKind.FUNCTION, f"chain_{chain}::fn_{index}"))
+            for index in range(32)
+        ]
+        for source, target in zip(chain_ids, chain_ids[1:], strict=False):
+            graph.add_edge(source, target, Edge.extracted(EdgeKind.CALLS))
+
+    native_value = graph.clone()
+    python_value = graph.clone()
+    original_native_graph = native_graph
+    dispatches = 0
+
+    class TrackedSnapshot:
+        def __init__(self, snapshot):
+            self.snapshot = snapshot
+
+        def trace_flows(self, *args, **kwargs):
+            nonlocal dispatches
+            dispatches += 1
+            return self.snapshot.trace_flows(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "graphician.analysis.native.native_graph",
+        lambda value: TrackedSnapshot(original_native_graph(value)),
+    )
+    assert compute_flows(native_value) == 32
+    assert dispatches == 1
+
+    monkeypatch.setattr("graphician.analysis.native.native_graph", lambda _value: None)
+    assert compute_flows(python_value) == 32
+
+    def flow_topology(value: Graph):
+        return sorted(
+            (
+                node.qualified_name,
+                node.properties,
+                sorted(
+                    (value.node(source).qualified_name, edge.kind.value)
+                    for source, edge in value.in_neighbors(node_id)
+                ),
+            )
+            for node_id, node in value.nodes()
+            if node.kind == NodeKind.FLOW
+        )
+
+    assert flow_topology(native_value) == flow_topology(python_value)
 
 
 def test_native_dedup_candidates_match_python_minhash() -> None:

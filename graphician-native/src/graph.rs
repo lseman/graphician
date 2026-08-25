@@ -178,6 +178,23 @@ impl NativeGraph {
     ) -> crate::analysis::community_metrics::QualityMetrics {
         crate::analysis::community_metrics::community_quality_metrics(self, assignments, resolution)
     }
+
+    #[pyo3(signature = (entries, placeholder_ids, max_depth=6, max_nodes_per_flow=200))]
+    pub fn trace_flows(
+        &self,
+        entries: Vec<u64>,
+        placeholder_ids: Vec<u64>,
+        max_depth: usize,
+        max_nodes_per_flow: usize,
+    ) -> PyResult<Vec<Vec<(u64, usize)>>> {
+        crate::analysis::flows::trace_flows(
+            self,
+            &entries,
+            &placeholder_ids,
+            max_depth,
+            max_nodes_per_flow,
+        )
+    }
 }
 
 fn centrality_edge_weight(kind: &str) -> f32 {

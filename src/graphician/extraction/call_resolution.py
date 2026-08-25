@@ -31,6 +31,7 @@ import logging
 import re
 from pathlib import Path
 
+from .._extract import plan_call_resolution
 from ..core.edge import Confidence, Edge, EdgeKind
 from ..core.graph import Graph
 from ..core.id import EdgeId, NodeId
@@ -45,17 +46,14 @@ logger = logging.getLogger(__name__)
 _SUPPRESS_CALLS = frozenset([
     # Python builtins and common constructors.
     "abs", "all", "any", "bool", "bytes", "callable", "dict", "dir",
-    "enumerate", "filter", "float", "getattr", "hasattr", "hash", "id",
-    "int", "isinstance", "iter", "len", "list", "map", "max", "min",
+    "enumerate", "float", "getattr", "hasattr", "hash", "id",
+    "int", "isinstance", "iter", "list", "max", "min",
     "next", "open", "print", "range", "repr", "reversed", "round",
     "set", "sorted", "str", "sum", "super", "tuple", "type", "vars",
     "zip",
-    # High-frequency string/collection methods (Python & Rust style).
-    # NOTE: Common methods like append, items, sort, split, join, etc.
-    # are intentionally LEFT UNSUPPRESSED so the stub resolver can match
-    # them against known library type stubs (list, dict, str, Path, etc.).
-    # Only keep truly noisy methods that lack stub coverage:
-    "pop", "remove", "__iter__", "__len__", "__getitem__",
+    # Dunder methods that are too noisy to resolve (appear on almost every object).
+    # These lack meaningful stub resolution anyway.
+    "__iter__", "__len__", "__getitem__",
     "__setitem__", "__delitem__", "__contains__", "__eq__", "__ne__",
     "__lt__", "__le__", "__gt__", "__ge__", "__hash__", "__bool__",
     "__repr__", "__str__", "__format__", "__enter__", "__exit__",
@@ -63,44 +61,45 @@ _SUPPRESS_CALLS = frozenset([
     "__setattr__", "__delattr__", "__dir__", "__reduce__", "__reduce_ex__",
     "__getattribute__", "__sizeof__", "__class__", "__doc__", "__module__",
     "__annotations__", "__dict__", "__weakref__", "__slots__",
+    # pop, remove, append, get, add, insert, find, contains, sort,
+    # new, clone, collect, extend, clear, replace, count, size, has,
+    # push, values, keys, join removed - they have stub coverage
     # Regex / re module methods.
     "match", "search", "fullmatch", "findall", "finditer", "sub",
-    "subn", "split", "compile", "escape", "quote", "pattern",
+    "subn", "compile", "escape", "quote", "pattern",
+    # split removed - has stub coverage in str/list
     # Math / numeric methods.
     "log2", "log10", "log", "sqrt", "ceil", "floor", "trunc",
     "abs", "round", "pow", "modf", "frexp", "ldexp",
     "isnan", "isinf", "isfinite",
     # Common class method / constructor parameters that leak as unresolved.
-    "cls", "self", "args", "kwargs", "key", "default", "factory", "ValueError", "TypeError", "AttributeError", "KeyError", "IndexError", "RuntimeError", "Exception",
+    "cls", "self", "kwargs", "key", "default", "factory", "ValueError", "TypeError", "AttributeError", "KeyError", "IndexError", "RuntimeError", "Exception",
+    # args removed - duplicate (also in Rust/std section)
     # Common string/collection methods not yet suppressed.
-    "splitlines", "translate", "ljust", "rjust", "zfill", "expandtabs", "replace", "casefold", "maketrans",
+    "splitlines", "translate", "ljust", "rjust", "zfill", "expandtabs",
+    # replace removed - has stub coverage in str
+    "casefold", "maketrans",
     # Rust/std/common fluent API calls that otherwise dominate
-    # unresolved call nodes.
-    "and_then", "as_bytes", "as_deref", "as_ref", "as_str", "chars",
-    "clone", "cloned", "clamp", "collect", "contains", "copied", "count",
-    "default", "ends_with", "entry", "err", "expect", "extend",
-    "filter_map", "find", "first", "flat_map", "fold", "from",
-    "from_str", "get", "get_mut", "index", "insert", "into", "into_iter",
-    "is_empty", "is_none", "is_some_and", "iter_mut", "join", "last",
-    "lines", "map_err", "new", "none", "ok", "ok_or", "ok_or_else",
-    "or_default", "position", "push", "push_str", "rsplit", "some",
-    "split", "splitn", "starts_with", "take", "to_owned",
-    "to_string", "to_string_lossy", "trim", "unwrap", "unwrap_or",
-    "unwrap_or_default", "unwrap_or_else", "with_capacity", "sort_by",
-    "sort_by_key", "sort_unstable", "truncate", "reserve", "clear",
-    "contains_key", "values", "concat", "to_vec", "read", "read_to_string",
+    # unresolved call nodes. Removed methods with stub coverage.
+    "as_bytes", "as_deref", "as_ref", "as_str", "chars", "clamp",
+    "default", "entry", "err", "expect", "fold", "from",
+    "index", "last", "none", "ok", "read", "read_to_string",
     "read_to_end", "remove_dir_all", "remove_file", "create_dir_all",
     "exists", "write", "write_all", "flush", "load", "display", "execute",
     "fg", "temp_dir", "args", "strip_prefix", "to_ascii_lowercase",
-    "trim_matches", "is_some", "or_else", "values_mut", "borrow", "has",
-    "pop_front", "push_back", "remove", "to_lowercase", "to_uppercase",
-    "split_whitespace", "saturating_sub", "replace", "to_string_pretty",
-    "as_array", "as_u64", "add", "string", "path", "file_name",
+    "values_mut", "borrow", "pop_front", "push_back",
+    "split_whitespace", "saturating_sub",
+    "as_array", "as_u64", "string", "file_name",
     "file_stem", "wrapping_add", "current_dir", "as_bool", "as_f64",
     "as_object", "render_widget", "highlight_style", "attr", "block",
     "border_style", "borders", "checkAvailable", "percentage",
-    "strip_suffix", "trim_end_matches", "pop", "chunks", "or_insert",
-    "or_insert_with",
+    "strip_suffix", "trim_end_matches", "or_else", "to_vec",
+    "to_string_lossy", "ends_with", "to_owned", "from_str",
+    "into", "into_iter", "is_some_and", "iter_mut",
+    "map_err", "or_default", "rsplit", "some", "trim", "unwrap", "unwrap_or",
+    "unwrap_or_default", "unwrap_or_else", "with_capacity",
+    "sort_by", "sort_by_key", "sort_unstable", "truncate", "reserve",
+    "contains_key", "is_none", "is_some", "or_insert", "or_insert_with"
     # SQLite rusqlite bindings.
     "query_map", "prepare", "commit", "transaction", "select", "selected",
     "query_row", "add_modifier",
@@ -356,6 +355,55 @@ def _build_import_tokens(graph: Graph) -> dict[str, set[str]]:
     return tokens
 
 
+def _build_imported_symbol_modules(
+    graph: Graph,
+) -> dict[tuple[str, str], list[tuple[str, str]]]:
+    """Map a local import name to ``(module, original name)`` bindings."""
+    imported: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for _, source, _target, edge in graph.edges():
+        if edge.kind != EdgeKind.IMPORTS:
+            continue
+        source_node = graph.node(source)
+        if source_node is None or source_node.source_uri is None:
+            continue
+        module_path = edge.properties.get("module_path")
+        symbols = edge.properties.get("imported_symbols")
+        if not isinstance(module_path, str) or not isinstance(symbols, dict):
+            continue
+        for local_name, original_name in symbols.items():
+            if isinstance(local_name, str) and isinstance(original_name, str):
+                imported.setdefault((source_node.source_uri, local_name), []).append(
+                    (module_path, original_name)
+                )
+    return imported
+
+
+def _module_matches_source(module_path: str, caller_uri: str, candidate_uri: str) -> bool:
+    """Match an absolute or relative Python import to a candidate source path."""
+    candidate = Path(candidate_uri).with_suffix("")
+    if candidate.name == "__init__":
+        candidate = candidate.parent
+
+    dots = len(module_path) - len(module_path.lstrip("."))
+    module_parts = tuple(part for part in module_path.lstrip(".").split(".") if part)
+    if dots:
+        expected = Path(caller_uri).parent
+        for _ in range(max(0, dots - 1)):
+            expected = expected.parent
+        expected = expected.joinpath(*module_parts)
+        expected_parts = expected.parts
+        return candidate.parts[: len(expected_parts)] == expected_parts
+
+    if not module_parts:
+        return False
+    candidate_parts = candidate.parts
+    width = len(module_parts)
+    return any(
+        candidate_parts[index : index + width] == module_parts
+        for index in range(len(candidate_parts) - width + 1)
+    )
+
+
 def _split_tokens(path: str) -> list[str]:
     """Split a module path on non-alphanumeric separators."""
     result: list[str] = []
@@ -376,13 +424,126 @@ def _split_tokens(path: str) -> list[str]:
 # Tier-based resolution
 # ---------------------------------------------------------------------------
 
+
+def _receiver_type_for_edge(
+    graph: Graph,
+    src_id: NodeId,
+    edge: Edge,
+    caller_impl_ctx: dict[NodeId, str],
+) -> str | None:
+    """Normalize language-specific receiver evidence for native resolution."""
+    receiver_name = edge.properties.get("call_receiver")
+    if not isinstance(receiver_name, str):
+        return None
+    src_node = graph.node(src_id)
+    source = (src_node.source_text if src_node else "") or ""
+    if receiver_name == "self" or receiver_name.startswith("self."):
+        return caller_impl_ctx.get(src_id) or _infer_impl_type_from_source(
+            source,
+            src_node.line_start if src_node else None,
+        )
+    return (
+        _infer_type_from_receiver_expression(receiver_name)
+        or _infer_type_from_annotations(source, receiver_name)
+        or _infer_type_from_let_bindings(source, receiver_name)
+        or _infer_type_from_var_name(receiver_name)
+    )
+
+
+def _resolve_call_placeholders_native(graph: Graph) -> int:
+    """Run native graph-wide selection and apply its mutation plan."""
+    if plan_call_resolution is None:
+        raise RuntimeError("native call resolution is unavailable")
+
+    caller_impl_ctx = _build_caller_impl_context(graph)
+    import_tokens = _build_import_tokens(graph)
+    imported_symbol_modules = _build_imported_symbol_modules(graph)
+    node_records = [
+        (
+            node_id.value,
+            node.kind.value,
+            node.name,
+            node.qualified_name,
+            node.source_uri,
+        )
+        for node_id, node in graph.nodes()
+    ]
+    edge_records = []
+    for edge_id, source, target, edge in graph.edges():
+        target_node = graph.node(target)
+        bare = (
+            target_node.qualified_name[6:]
+            if target_node is not None
+            and target_node.qualified_name.startswith("call::")
+            else ""
+        )
+        scope = edge.properties.get("call_scope")
+        edge_records.append(
+            (
+                edge_id.value,
+                source.value,
+                target.value,
+                edge.kind.value,
+                edge.confidence.value,
+                scope if isinstance(scope, str) else None,
+                _receiver_type_for_edge(graph, source, edge, caller_impl_ctx)
+                if bare and edge.kind == EdgeKind.CALLS
+                else None,
+                should_suppress_call_placeholder(bare) if bare else False,
+            )
+        )
+    binding_records = [
+        (uri, local, module, original)
+        for (uri, local), bindings in imported_symbol_modules.items()
+        for module, original in bindings
+    ]
+    resolutions, stale_edge_ids = plan_call_resolution(
+        node_records,
+        edge_records,
+        [(uri, sorted(tokens)) for uri, tokens in import_tokens.items()],
+        binding_records,
+    )
+
+    for _edge_id, source, target, tag, structural in resolutions:
+        resolved = (
+            Edge.extracted(EdgeKind.CALLS)
+            if structural
+            else Edge.inferred(EdgeKind.CALLS, 0.7)
+        )
+        resolved.properties["resolved_from"] = f"call_placeholder::{tag}"
+        graph.add_edge(NodeId(source), NodeId(target), resolved)
+    if stale_edge_ids:
+        graph.remove_edges_by_id([EdgeId(edge_id) for edge_id in stale_edge_ids])
+        orphaned = [
+            node_id
+            for node_id, node in graph.nodes()
+            if node.qualified_name.startswith("call::")
+            and not any(graph.out_neighbors(node_id))
+            and not any(graph.in_neighbors(node_id))
+        ]
+        for node_id in orphaned:
+            graph.remove_node(node_id)
+    return len(resolutions)
+
+
 def resolve_call_placeholders(graph: Graph) -> int:
+    """Resolve call placeholders natively, retaining the Python fallback."""
+    if plan_call_resolution is not None:
+        try:
+            return _resolve_call_placeholders_native(graph)
+        except Exception:
+            logger.warning("Native call resolution failed; using Python fallback", exc_info=True)
+    return _resolve_call_placeholders_python(graph)
+
+
+def _resolve_call_placeholders_python(graph: Graph) -> int:
     """Resolve ``call::name`` placeholder edges in the graph.
 
     Returns the number of new resolved ``Calls`` edges added.
     """
     by_name = _build_by_name(graph)
     import_tokens = _build_import_tokens(graph)
+    imported_symbol_modules = _build_imported_symbol_modules(graph)
     caller_impl_ctx = _build_caller_impl_context(graph)
 
     # Track existing call edges to avoid duplicates.
@@ -404,20 +565,32 @@ def resolve_call_placeholders(graph: Graph) -> int:
         if not name.startswith("call::"):
             continue
         bare = name[6:]
-        if should_suppress_call_placeholder(bare):
-            # Suppressed calls represent language/runtime noise rather than
-            # unresolved project relationships. Remove their placeholder edge
-            # so coverage and traversal do not treat them as graph dead ends.
-            stale_edges.append(edge_id)
-            continue
-
-        candidates = by_name.get(bare)
-        if candidates is None:
-            # No candidate at all — leave placeholder unresolved.
+        src_node = graph.node(src_id)
+        src_file = src_node.source_uri if src_node is not None else None
+        imported_bindings = (
+            imported_symbol_modules.get((src_file, bare), [])
+            if src_file is not None
+            else []
+        )
+        candidate_names = {bare, *(original for _, original in imported_bindings)}
+        candidates = [
+            candidate
+            for candidate_name in candidate_names
+            for candidate in by_name.get(candidate_name, [])
+        ]
+        candidates = list(dict.fromkeys(candidates))
+        suppressed_name = should_suppress_call_placeholder(bare)
+        if not candidates:
+            if suppressed_name:
+                # Suppression applies only when the repository has no matching
+                # definition. Project APIs are allowed to use common names such
+                # as get, load, parse, add, and len.
+                stale_edges.append(edge_id)
+            # No project candidate at all — leave non-noise placeholders unresolved.
             continue
 
         # ── Tier 1: unique name ────────────────────────────────────
-        if len(candidates) == 1:
+        if len(candidates) == 1 and not suppressed_name:
             stale_edges.append(edge_id)
             cand = candidates[0]
             if (src_id.value, cand.value) not in existing_calls:
@@ -425,8 +598,6 @@ def resolve_call_placeholders(graph: Graph) -> int:
             continue
 
         # ── Tier 2: file-local ─────────────────────────────────────
-        src_node = graph.node(src_id)
-        src_file = src_node.source_uri if src_node is not None else None
         if src_file is not None:
             local: list[NodeId] = []
             for cand in candidates:
@@ -506,6 +677,29 @@ def resolve_call_placeholders(graph: Graph) -> int:
                     continue
 
         # ── Tier 5: import-scoped ──────────────────────────────────
+        if src_file is not None:
+            imported_by_name = [
+                candidate
+                for candidate in candidates
+                if (candidate_node := graph.node(candidate)) is not None
+                and candidate_node.source_uri is not None
+                and any(
+                    candidate_node.name == original_name
+                    and _module_matches_source(
+                        module, src_file, candidate_node.source_uri
+                    )
+                    for module, original_name in imported_bindings
+                )
+            ]
+            if len(imported_by_name) == 1:
+                stale_edges.append(edge_id)
+                candidate = imported_by_name[0]
+                if (src_id.value, candidate.value) not in existing_calls:
+                    additions.append(
+                        (src_id.value, candidate.value, "imported_symbol", False)
+                    )
+                continue
+
         if src_file is not None and src_file in import_tokens:
             tokens = import_tokens[src_file]
             imported: list[NodeId] = []
@@ -543,6 +737,10 @@ def resolve_call_placeholders(graph: Graph) -> int:
                     continue
 
         # ── Tier 7: frequency prior ────────────────────────────────
+        if suppressed_name:
+            stale_edges.append(edge_id)
+            continue
+
         scored: list[tuple[NodeId, int]] = []
         for cand in candidates:
             in_calls = sum(

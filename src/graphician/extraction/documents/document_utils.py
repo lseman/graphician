@@ -11,14 +11,39 @@ Provides utilities for:
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from ...core.edge import Edge, EdgeKind
 from ...core.id import NodeId
 from ...core.node import NodeKind
 
+_CODE_KINDS = {
+    NodeKind.FUNCTION,
+    NodeKind.CLASS,
+    NodeKind.METHOD,
+    NodeKind.TYPE,
+    NodeKind.TRAIT,
+    NodeKind.IMPL,
+}
 
-def resolve_symbol(graph, token: str) -> NodeId | None:
+
+def _symbol_index(graph) -> tuple[dict[str, NodeId], dict[str, NodeId]]:
+    """Index first-match symbol names with the same ordering as graph iteration."""
+    by_name: dict[str, NodeId] = {}
+    by_normalized_name: dict[str, NodeId] = {}
+    for node_id, node in graph.nodes():
+        if node.kind not in _CODE_KINDS:
+            continue
+        by_name.setdefault(node.name, node_id)
+        by_normalized_name.setdefault(normalize_for_match(node.name), node_id)
+    return by_name, by_normalized_name
+
+
+def resolve_symbol(
+    graph,
+    token: str,
+    *,
+    index: tuple[dict[str, NodeId], dict[str, NodeId]] | None = None,
+) -> NodeId | None:
     """Resolve a symbol name to a graph node.
 
     Matches by exact name, qualified_name suffix, or normalized match.
@@ -31,23 +56,11 @@ def resolve_symbol(graph, token: str) -> NodeId | None:
     if exact is not None:
         return exact
 
-    for nid, node in graph.nodes():
-        if node.kind not in (
-            NodeKind.FUNCTION,
-            NodeKind.CLASS,
-            NodeKind.METHOD,
-            NodeKind.TYPE,
-            NodeKind.TRAIT,
-            NodeKind.IMPL,
-        ):
-            continue
-        if node.name == token:
-            return nid
-        if node.qualified_name.endswith(f"::{token}"):
-            return nid
-        if normalize_for_match(node.name) == normalize_for_match(token):
-            return nid
-    return None
+    by_name, by_normalized_name = index or _symbol_index(graph)
+    named = by_name.get(token)
+    if named is not None:
+        return named
+    return by_normalized_name.get(normalize_for_match(token))
 
 
 def mention(graph, section_id: NodeId, token: str, confidence: float) -> None:
@@ -151,9 +164,10 @@ def resolve_mentions(graph) -> int:
             existing.add((src, dst))
 
     added = 0
+    index = _symbol_index(graph)
     for section_id, tokens in pending:
         for token, confidence in tokens:
-            target = resolve_symbol(graph, token)
+            target = resolve_symbol(graph, token, index=index)
             if target is None:
                 continue
             if (section_id, target) in existing:

@@ -240,6 +240,11 @@ def resolve_library_stubs(graph: Graph) -> int:
         if best_type is None and candidates:
             best_type, best_dialect = candidates[0]
 
+        if best_type is None or best_dialect is None:
+            # candidates is always non-empty by this point (guarded above),
+            # so the fallback always sets both -- this is unreachable.
+            continue
+
         # Get or create the stub node
         stub_id = stub_type_nodes.get(best_type)
         if stub_id is None:

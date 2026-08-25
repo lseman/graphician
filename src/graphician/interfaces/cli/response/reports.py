@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ....core.id import NodeId
 from .analysis import bridge_nodes_json, diagnostics_json, gaps_json, surprises_json
 from .architecture import architecture_overview_json
 
@@ -30,7 +31,7 @@ def generate_report_markdown(db_path: str, top: int = 25) -> str:
         arch = architecture_overview_json(graph, "standard")
 
         # PageRank-like ranking (simple degree-based)
-        degrees: dict[int, int] = {}
+        degrees: dict[NodeId, int] = {}
         for _, src, dst, _ in graph.edges():
             degrees[src] = degrees.get(src, 0) + 1
             degrees[dst] = degrees.get(dst, 0) + 1

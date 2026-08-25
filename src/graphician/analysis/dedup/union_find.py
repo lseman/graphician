@@ -92,9 +92,9 @@ def deduplicate_nodes(
         for comm in comm_result.get("communities", []):
             for node_info in comm.get("nodes", []):
                 qn = node_info.get("qualified_name", "")
-                nid = graph.find_by_qname(qn)
-                if nid:
-                    community_map[nid.value] = comm["id"]
+                comm_nid = graph.find_by_qname(qn)
+                if comm_nid:
+                    community_map[comm_nid.value] = comm["id"]
     except Exception:  # noqa: BLE001 -- community boost is a best-effort enhancement
         pass
 

@@ -61,6 +61,9 @@ def fts_ranked_search(
             nid = graph.find_by_qname(qname)
             if nid is None:
                 continue
+            nid_node = graph.node(nid)
+            if nid_node is None:
+                continue
             fts_boost = reciprocal_rank_boost(rank, 3600.0)
             if nid.value in merged:
                 merged[nid.value].score += fts_boost
@@ -69,7 +72,7 @@ def fts_ranked_search(
             else:
                 merged[nid.value] = SearchHit(
                     id=nid,
-                    node=graph.node(nid),
+                    node=nid_node,
                     score=fts_boost,
                     reasons=["fts5"],
                 )
@@ -80,6 +83,9 @@ def fts_ranked_search(
             nid = graph.find_by_qname(qname)
             if nid is None:
                 continue
+            nid_node = graph.node(nid)
+            if nid_node is None:
+                continue
             semantic_boost = reciprocal_rank_boost(rank, 2700.0)
             if nid.value in merged:
                 merged[nid.value].score += semantic_boost
@@ -88,7 +94,7 @@ def fts_ranked_search(
             else:
                 merged[nid.value] = SearchHit(
                     id=nid,
-                    node=graph.node(nid),
+                    node=nid_node,
                     score=semantic_boost,
                     reasons=["semantic"],
                 )
@@ -99,8 +105,8 @@ def fts_ranked_search(
     query_tokens = _search_query_tokens(normalized_query)
     symbol_query = _is_symbol_query(query)
 
-    for nid, hit in list(merged.items()):
-        node = graph.node(NodeId(nid))
+    for hit_id, hit in list(merged.items()):
+        node = graph.node(NodeId(hit_id))
         if node is None:
             continue
 

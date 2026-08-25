@@ -98,7 +98,7 @@ def _extract_custom(path: Path, graph, lang_def: LanguageDef) -> None:
                 if name:
                     kind = NodeKind.FUNCTION if child.type in function_types else NodeKind.CLASS
                     qname = f"{scope_qn}::{name}"
-                    properties = {"language": lang_def.name}
+                    properties: dict[str, Any] = {"language": lang_def.name}
                     if file_is_test:
                         properties["is_test"] = True
                     definition = Node(

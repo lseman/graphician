@@ -302,7 +302,7 @@ def enforce_connected(working: WorkingGraph, labels: list[int]) -> list[int]:
 
     # Apply new labels
     for u in range(n):
-        if new_labels[u] is not None:
-            labels[u] = new_labels[u]
+        if (new_label := new_labels[u]) is not None:
+            labels[u] = new_label
 
     return labels

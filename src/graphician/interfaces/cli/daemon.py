@@ -67,7 +67,7 @@ def cmd_install(db_path: str, repo: str, force: bool = False,
     hooks_dir = git_dir / "hooks"
     hooks_dir.mkdir(exist_ok=True)
 
-    db_path = Path(db_path).resolve()
+    db_path_obj = Path(db_path).resolve()
 
     result: dict[str, Any] = {"hooks_installed": [], "configs_installed": []}
 
@@ -82,7 +82,7 @@ def cmd_install(db_path: str, repo: str, force: bool = False,
 
         script = (
             f'#!/bin/sh\n'
-            f'"{sys.executable}" -m graphician --db "{db_path}" update '
+            f'"{sys.executable}" -m graphician --db "{db_path_obj}" update '
             f'"{repo_path}" >/dev/null 2>&1 || true\n'
         )
         hook_path.write_text(script, encoding="utf-8")
@@ -94,9 +94,9 @@ def cmd_install(db_path: str, repo: str, force: bool = False,
         agents_path = repo_path / "AGENTS.md"
         block = (
             f"# Graphician Agent Instructions\n\n"
-            f"- Start exploration with `graphician --db {db_path} tool "
+            f"- Start exploration with `graphician --db {db_path_obj} tool "
             f'minimal_context --params \'{{"target":"...","mode":"review"}}\'`.\n'
-            f"- For code review, run `graphician --db {db_path} tool "
+            f"- For code review, run `graphician --db {db_path_obj} tool "
             f'detect_changes --params \'{{"base":"HEAD~1"}}\'` before reading files.\n'
             f"- Use `impact`, `traverse`, and `review_context` to gather bounded "
             f"context before broad grep/read.\n"
@@ -110,7 +110,7 @@ def cmd_install(db_path: str, repo: str, force: bool = False,
 
     # Install MCP configs
     if mcp:
-        _install_mcp_configs(repo_path, db_path, result)
+        _install_mcp_configs(repo_path, db_path_obj, result)
 
     return result
 

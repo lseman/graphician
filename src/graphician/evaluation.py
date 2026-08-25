@@ -691,7 +691,7 @@ def _impact_accuracy_learned(
             file_to_nodes[node.source_uri].append((nid.value, node.qualified_name))
 
     # Count cross-file pairs connected by each edge kind
-    edge_stats: dict[str, tuple[int, int]] = defaultdict(lambda: (0, 0))  # (total, cochanged)
+    edge_stats: dict[str, list[int]] = defaultdict(lambda: [0, 0])  # [total, cochanged]
 
     for _, src, dst, edge in graph.edges():
         src_node = graph.node(src)

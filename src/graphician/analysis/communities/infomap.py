@@ -259,7 +259,7 @@ def _random_walk_init(working: WorkingGraph) -> list[int]:
     rng = LcgRng()
 
     # Compute degree for random walk selection
-    degree = [
+    walk_degree = [
         sum(w for _, w in working.adj[u]) + 2.0 * working.self_loop[u]
         for u in range(n)
     ]
@@ -270,7 +270,7 @@ def _random_walk_init(working: WorkingGraph) -> list[int]:
         node = rng.gen_range(0, n)
         for _ in range(walk_steps):
             visits[node] += 1
-            total = degree[node]
+            total = walk_degree[node]
             if total <= 0.0:
                 break
             r = rng.gen_f32() * total

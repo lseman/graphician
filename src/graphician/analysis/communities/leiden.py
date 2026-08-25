@@ -167,7 +167,7 @@ def _local_move(working: WorkingGraph, options: CommunityOptions) -> list[int]:
                 weight_to_comm[comm[v]] += w
 
             best = current
-            best_gain = options.min_modularity_gain
+            best_gain: float = options.min_modularity_gain
 
             # Stay gain
             stay_weight = weight_to_comm.get(current, 0.0)
@@ -176,10 +176,10 @@ def _local_move(working: WorkingGraph, options: CommunityOptions) -> list[int]:
                 best_gain = stay_gain
                 best = current
 
-            for candidate, edge_weight in weight_to_comm.items():
+            for candidate, comm_weight in weight_to_comm.items():
                 if candidate == current:
                     continue
-                gain = edge_weight - options.resolution * node_degree * comm_degree[candidate] / two_m
+                gain = comm_weight - options.resolution * node_degree * comm_degree[candidate] / two_m
                 if gain > best_gain:
                     best_gain = gain
                     best = candidate

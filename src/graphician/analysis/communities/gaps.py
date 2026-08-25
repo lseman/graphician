@@ -57,11 +57,11 @@ def knowledge_gaps(graph: Graph) -> dict[str, Any]:
         cid = comm["id"]
         for node_info in comm.get("nodes", []):
             qn = node_info.get("qualified_name", "")
-            nid = graph.find_by_qname(qn)
-            if nid:
-                node = graph.node(nid)
-                if node and node.source_uri:
-                    comm_files[cid].add(node.source_uri)
+            member_id = graph.find_by_qname(qn)
+            if member_id:
+                member_node = graph.node(member_id)
+                if member_node and member_node.source_uri:
+                    comm_files[cid].add(member_node.source_uri)
 
     # Thin communities: size < 3
     thin: list[dict[str, Any]] = [

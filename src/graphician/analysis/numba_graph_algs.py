@@ -211,12 +211,12 @@ def _kcore_csr(
     max_deg = 0
     for d in degree:
         if d > max_deg:
-            max_deg = d
+            max_deg = int(d)
 
     # Bucket sort: group nodes by degree
     # bucket[k] = linked list of nodes with degree k
     # We use a simple array with next pointers
-    bucket_head = np.zeros(max_deg + 2, dtype=np.int32)  # -1 means empty
+    bucket_head = np.full(max_deg + 2, -1, dtype=np.int32)  # -1 means empty
     node_bucket = np.full(n, -1, dtype=np.int32)  # which bucket slot
     bucket_next = np.full(n, -1, dtype=np.int32)  # next node in same bucket
 

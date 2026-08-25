@@ -303,8 +303,8 @@ def cmd_serve(db_path: str, bind: str = "127.0.0.1:8080", algorithm: str = "louv
 
     # Parse bind address
     if ":" in bind:
-        host, port = bind.rsplit(":", 1)
-        port = int(port)
+        host, port_str = bind.rsplit(":", 1)
+        port = int(port_str)
     else:
         host = "127.0.0.1"
         port = int(bind)

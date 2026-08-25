@@ -561,9 +561,10 @@ def _minimal_context(graph: Graph, params: dict[str, Any]) -> dict[str, Any]:
                 visited.add(neighbor)
                 queue.append((neighbor, depth + 1))
 
+    start_node = graph.node(start)
     return {
         "operation": "minimal_context",
-        "target": graph.node(start).qualified_name,
+        "target": start_node.qualified_name if start_node is not None else target,
         "mode": params.get("mode", "review"),
         "nodes": nodes,
         "edges": edges,

@@ -178,13 +178,15 @@ def _weighted_pagerank(
 
     transitions = _weighted_transitions(graph, nodes, node_index)
 
+    fallback_personalization = (
+        [personalization.get(nodes[i], 0.0) for i in range(n)]
+        if has_personalization else None
+    )
+
     for _ in range(iterations):
-        if has_personalization:
-            personalization_vec = [
-                personalization.get(nodes[i], 0.0) for i in range(n)
-            ]
+        if fallback_personalization is not None:
             next_ranks = [
-                (1.0 - damping) * p for p in personalization_vec
+                (1.0 - damping) * p for p in fallback_personalization
             ]
         else:
             uniform = 1.0 / n

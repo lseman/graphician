@@ -29,7 +29,10 @@ from graphician.core.node import Node, NodeKind
 
 
 def _text(node: ts.Node) -> str:
-    return node.text.decode("utf-8", errors="replace")
+    raw = node.text
+    if raw is None:
+        return ""
+    return raw.decode("utf-8", errors="replace")
 
 
 def _children(node: ts.Node) -> list[ts.Node]:

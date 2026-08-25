@@ -269,7 +269,11 @@ def _multi_hop(_repo: Path, store: GraphStore, config: dict[str, Any]) -> list[d
             node_id = graph.find_by_qname(hits[rank - 1])
             if node_id is not None:
                 fn = callees_of if task.get("traversal_pattern") == "callees_of" else callers_of
-                neighbors = [graph.node(item).qualified_name.lower() for item in fn(graph, node_id)]
+                neighbors = [
+                    n.qualified_name.lower()
+                    for item in fn(graph, node_id)
+                    if (n := graph.node(item)) is not None
+                ]
         expected = [name.lower() for name in task.get("expected_neighbor_names", [])]
         recall = sum(any(name in neighbor for neighbor in neighbors) for name in expected) / max(
             1, len(expected)
@@ -396,10 +400,11 @@ def _agent_baseline(repo: Path, store: GraphStore, config: dict[str, Any]) -> li
             continue
         qnames = _search(store, query["query"], 20)
         graph_files = {
-            _normalize_path(graph.node(graph.find_by_qname(qname)).source_uri)
+            _normalize_path(node.source_uri)
             for qname in qnames
-            if graph.find_by_qname(qname) is not None
-            and graph.node(graph.find_by_qname(qname)).source_uri
+            if (node_id := graph.find_by_qname(qname)) is not None
+            and (node := graph.node(node_id)) is not None
+            and node.source_uri
         }
         lexical = _lexical_files(repo, query["query"], 10)
         rows.append(

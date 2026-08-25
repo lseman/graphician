@@ -24,7 +24,7 @@ from .core import (
     relabel,
 )
 from .numba_accel import _local_move_csr, build_csr_from_working, has_numba
-from .utils import _find_cross_community_edges, _modularity, _to_networkx
+from .utils import _find_cross_community_edges, _modularity, _node_summary, _to_networkx
 
 
 def louvain(
@@ -229,14 +229,7 @@ def detect_communities(
                 "id": cid,
                 "size": len(nodes),
                 "nodes": [
-                    {
-                        "qualified_name": graph.node(NodeId(nid)).qualified_name
-                        if graph.node(NodeId(nid))
-                        else f"node:{nid}",
-                        "kind": graph.node(NodeId(nid)).kind.value
-                        if graph.node(NodeId(nid))
-                        else "unknown",
-                    }
+                    _node_summary(graph, nid)
                     for nid in sorted(nodes)[:20]
                 ],
             }

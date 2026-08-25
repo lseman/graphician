@@ -9,7 +9,7 @@ import networkx as nx
 from ...core.graph import Graph
 from ...core.id import NodeId
 from ...core.node import Node, NodeKind
-from .utils import _to_networkx
+from .utils import _qualified_name_or_fallback, _to_networkx
 
 
 def find_bridge_nodes(
@@ -117,8 +117,7 @@ def compute_centrality(
     pagerank_scores = pagerank(graph, damping=0.85)
     return {
         "degree_centrality": {
-            graph.node(NodeId(nid)).qualified_name if graph.node(NodeId(nid)) else f"node:{nid}":
-            round(score, 4)
+            _qualified_name_or_fallback(graph, NodeId(nid)): round(score, 4)
             for nid, score in sorted(
                 nx.degree_centrality(nx_graph).items(),
                 key=lambda x: x[1],
@@ -126,8 +125,7 @@ def compute_centrality(
             )[:30]
         },
         "betweenness_centrality": {
-            graph.node(NodeId(nid)).qualified_name if graph.node(NodeId(nid)) else f"node:{nid}":
-            round(score, 4)
+            _qualified_name_or_fallback(graph, NodeId(nid)): round(score, 4)
             for nid, score in sorted(
                 nx.betweenness_centrality(nx_graph).items(),
                 key=lambda x: x[1],
@@ -135,8 +133,7 @@ def compute_centrality(
             )[:30]
         },
         "pagerank": {
-            graph.node(nid).qualified_name if graph.node(nid) else f"node:{nid.value}":
-            round(score, 6)
+            _qualified_name_or_fallback(graph, nid): round(score, 6)
             for nid, score in sorted(
                 pagerank_scores.items(),
                 key=lambda x: x[1],

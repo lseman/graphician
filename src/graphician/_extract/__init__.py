@@ -28,6 +28,9 @@ if _lib_path is not None:
     import importlib.util
 
     _spec = importlib.util.spec_from_file_location("graphician_native", _lib_path)
+    assert _spec is not None and _spec.loader is not None, (
+        f"failed to build a module spec for {_lib_path}"
+    )
     _mod = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(_mod)
     extract_python_file = _mod.extract_python_file

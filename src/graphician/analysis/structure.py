@@ -63,6 +63,12 @@ class HubNode:
     community_id: int | None = None
 
 
+def _qname_or_placeholder(graph: Graph, node_id: int) -> str:
+    """Resolve a node's qualified name, or a `node:<id>` placeholder if missing."""
+    node = graph.node(NodeId(node_id))
+    return node.qualified_name if node is not None else f"node:{node_id}"
+
+
 def cyclic_components(graph: Graph) -> list[Component]:
     """Find cyclic (strongly connected) components via Tarjan's algorithm.
 
@@ -630,9 +636,7 @@ def find_counterfactual(
         "node_kind": node.kind.value,
         "affected_node_count": len(affected),
         "affected_nodes": [
-            graph.node(NodeId(nid)).qualified_name
-            if graph.node(NodeId(nid))
-            else f"node:{nid}"
+            _qname_or_placeholder(graph, nid)
             for nid in sorted(affected)[:50]
         ],
         "broken_incoming_edges": broken_incoming,
@@ -687,9 +691,7 @@ def _find_diamonds(nx_graph: nx.DiGraph, graph: Graph) -> dict[str, Any]:
                     if d == a:
                         continue
                     nodes = [
-                        graph.node(NodeId(n)).qualified_name
-                        if graph.node(NodeId(n))
-                        else f"node:{n}"
+                        _qname_or_placeholder(graph, n)
                         for n in [a, b, c, d]
                     ]
                     diamonds.append({
@@ -716,12 +718,7 @@ def _find_feedback(nx_graph: nx.DiGraph, graph: Graph) -> dict[str, Any]:
             pair = tuple(sorted([a, b]))
             if pair not in seen:
                 seen.add(pair)
-                nodes = [
-                    graph.node(NodeId(n)).qualified_name
-                    if graph.node(NodeId(n))
-                    else f"node:{n}"
-                    for n in [a, b]
-                ]
+                nodes = [_qname_or_placeholder(graph, n) for n in [a, b]]
                 feedback.append({
                     "pattern": "feedback",
                     "nodes": nodes,

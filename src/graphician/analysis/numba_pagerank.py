@@ -160,12 +160,17 @@ def pagerank_csr(
     n = len(out_degree)
     has_personalization = personalization is not None
 
-    if has_personalization and len(personalization) != n:
+    if personalization is not None and len(personalization) != n:
         raise ValueError("Personalization vector length must match n")
 
-    return _weighted_pagerank_csr(
+    personalization_arr = (
+        personalization if personalization is not None
+        else np.zeros(n, dtype=np.float64)
+    )
+
+    return _pagerank_csr(
         n, row_ptr, col_idx, edge_weight, out_degree,
-        damping, iterations,
+        damping, iterations, personalization_arr, has_personalization,
     )
 
 

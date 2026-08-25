@@ -56,7 +56,9 @@ def _add_node(
         for k, v in default_props.items():
             node = node.with_property(k, v)
     graph.add_node(node)
-    return graph.find_by_qname(qn)
+    result = graph.find_by_qname(qn)
+    assert result is not None, f"Node not found after add: {qn}"
+    return result
 
 
 def _emit_call(
@@ -230,8 +232,8 @@ def _walk(node: ts.Node, source: str, graph: Graph, file_qn: str, path: Path, pa
             if superclass:
                 super_name = _text(superclass, source)
                 super_qn = f"type::{super_name}"
-                _add_node(graph, NodeKind.CLASS, super_qn, Path(""), 0, 0)
-                graph.add_edge(class_id, graph.find_by_qname(super_qn), Edge.extracted(EdgeKind.INHERITS))
+                super_id = _add_node(graph, NodeKind.CLASS, super_qn, Path(""), 0, 0)
+                graph.add_edge(class_id, super_id, Edge.extracted(EdgeKind.INHERITS))
 
             body = _child_by_field(child, "body")
             if body:
@@ -254,8 +256,8 @@ def _walk(node: ts.Node, source: str, graph: Graph, file_qn: str, path: Path, pa
                     superclass = named[-1] if named else None
             if superclass:
                 super_qn = f"type::{_text(superclass, source)}"
-                _add_node(graph, NodeKind.CLASS, super_qn, Path(""), 0, 0)
-                graph.add_edge(class_id, graph.find_by_qname(super_qn), Edge.extracted(EdgeKind.INHERITS))
+                super_id = _add_node(graph, NodeKind.CLASS, super_qn, Path(""), 0, 0)
+                graph.add_edge(class_id, super_id, Edge.extracted(EdgeKind.INHERITS))
             body = _child_by_field(child, "body")
             if body:
                 _walk(body, source, graph, file_qn, path, class_id, True, False)

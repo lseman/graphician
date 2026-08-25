@@ -27,7 +27,10 @@ from graphician.core.node import Node, NodeKind
 
 
 def _text(node: ts.Node) -> str:
-    return node.text.decode("utf-8", errors="replace")
+    raw = node.text
+    if raw is None:
+        return ""
+    return raw.decode("utf-8", errors="replace")
 
 
 def _children(node: ts.Node) -> list[ts.Node]:
@@ -59,7 +62,9 @@ def _add_node(
         for k, v in default_props.items():
             node = node.with_property(k, v)
     graph.add_node(node)
-    return graph.find_by_qname(qn)
+    result = graph.find_by_qname(qn)
+    assert result is not None, f"Node not found after add: {qn}"
+    return result
 
 
 def _emit_calls(
@@ -369,9 +374,8 @@ def _handle_declaration(
                 name = _text(name_node)
                 child_scope = [*scope, name]
                 qn = f"{file_qn}::{'::'.join(child_scope)}"
-                _add_node(graph, NodeKind.VARIABLE, qn, path,
+                var_id = _add_node(graph, NodeKind.VARIABLE, qn, path,
                           node.start_point.row, node.end_point.row)
-                graph.add_edge(parent_id, graph.find_by_qname(qn),
-                              Edge.extracted(EdgeKind.DEFINES))
+                graph.add_edge(parent_id, var_id, Edge.extracted(EdgeKind.DEFINES))
         elif child.type == "function_definition":
             _handle_function(child, source, graph, file_qn, path, parent_id, scope, False)

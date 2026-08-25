@@ -30,7 +30,10 @@ from graphician.core.node import Node, NodeKind
 
 
 def _text(node: ts.Node) -> str:
-    return node.text.decode("utf-8", errors="replace")
+    raw = node.text
+    if raw is None:
+        return ""
+    return raw.decode("utf-8", errors="replace")
 
 
 def _children(node: ts.Node) -> list[ts.Node]:
@@ -62,7 +65,9 @@ def _add_node(
         for k, v in default_props.items():
             node = node.with_property(k, v)
     graph.add_node(node)
-    return graph.find_by_qname(qn)
+    result = graph.find_by_qname(qn)
+    assert result is not None, f"Node not found after add: {qn}"
+    return result
 
 
 def _extract_decorators(node: ts.Node, source: str) -> list[str]:
@@ -407,11 +412,10 @@ def _handle_type_alias(
     child_scope = [*scope, name]
     qn = f"{file_qn}::{'::'.join(child_scope)}"
 
-    _add_node(graph, NodeKind.TYPE, qn, path,
+    alias_id = _add_node(graph, NodeKind.TYPE, qn, path,
               node.start_point.row, node.end_point.row,
               _text(node))
-    graph.add_edge(parent_id, graph.find_by_qname(qn),
-                  Edge.extracted(EdgeKind.DEFINES))
+    graph.add_edge(parent_id, alias_id, Edge.extracted(EdgeKind.DEFINES))
 
 
 def _handle_enum(
@@ -445,10 +449,9 @@ def _handle_enum(
                 member_name = member.child_by_field_name("name")
                 if member_name:
                     member_qn = f"{qn}::{_text(member_name)}"
-                    _add_node(graph, NodeKind.VARIABLE, member_qn, path,
+                    member_id = _add_node(graph, NodeKind.VARIABLE, member_qn, path,
                               member.start_point.row, member.end_point.row)
-                    graph.add_edge(enum_id, graph.find_by_qname(member_qn),
-                                   Edge.extracted(EdgeKind.DEFINES))
+                    graph.add_edge(enum_id, member_id, Edge.extracted(EdgeKind.DEFINES))
 
 
 def _handle_lexical_decl(

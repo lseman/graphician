@@ -282,6 +282,9 @@ def _extract_feature(
     if pkg_id and feat_id:
         graph.add_edge(pkg_id, feat_id, Edge.extracted(EdgeKind.DEFINES))
 
+    if feat_id is None:
+        return
+
     # Link feature to its dependency features
     for dep in feature_deps:
         # Features can reference other features on the same or other packages

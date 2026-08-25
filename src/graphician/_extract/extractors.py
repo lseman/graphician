@@ -33,7 +33,7 @@ def _add_node(
     line_end: int,
     source_text: str | None = None,
     props: dict[str, Any] | None = None,
-) -> NodeId | None:
+) -> NodeId:
     """Add a node to the graph, deduplicating by qualified_name."""
     existing = graph.find_by_qname(qn)
     if existing is not None:
@@ -46,7 +46,9 @@ def _add_node(
         for k, v in props.items():
             node = node.with_property(k, v)
     graph.add_node(node)
-    return graph.find_by_qname(qn)
+    result = graph.find_by_qname(qn)
+    assert result is not None, f"Node not found after add: {qn}"
+    return result
 
 
 def _parse_properties(props: Any) -> dict[str, Any]:

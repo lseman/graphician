@@ -396,7 +396,7 @@ def _nodes_json(graph, ids: list, limit: int = 50) -> list[dict[str, Any]]:
             # Try to find by iterating
             for _, n in graph.nodes():
                 if str(n.__hash__()) == str(node_id) or (
-                    hasattr(n, "id") and n.id == node_id  # type: ignore[attr-defined]
+                    hasattr(n, "id") and n.id == node_id
                 ):
                     node = n
                     break

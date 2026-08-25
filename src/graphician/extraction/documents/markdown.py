@@ -20,12 +20,12 @@ try:
     import pulldown_cmark as pc
     from pulldown_cmark import Event, Options, Parser, Tag, TagEnd
 except ImportError:
-    pc = None  # type: ignore[assignment]
-    Options = None  # type: ignore[assignment]
-    Parser = None  # type: ignore[assignment]
-    Event = None  # type: ignore[assignment]
-    Tag = None  # type: ignore[assignment]
-    TagEnd = None  # type: ignore[assignment]
+    pc = None
+    Options = None
+    Parser = None
+    Event = None
+    Tag = None
+    TagEnd = None
 
 from ...core.edge import Edge, EdgeKind
 from ...core.id import NodeId

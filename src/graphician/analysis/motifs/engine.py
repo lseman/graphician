@@ -84,7 +84,7 @@ def find_motifs(graph: Graph, motif: Motif, limit: int = 50) -> list[MotifMatch]
         return results
 
     # Run backtracking search
-    results: list[MotifMatch] = []
+    results = []
     current_map: dict[int, NodeId] = {}
 
     def backtrack(depth: int) -> None:

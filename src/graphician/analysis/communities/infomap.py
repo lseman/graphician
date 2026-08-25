@@ -259,7 +259,7 @@ def _random_walk_init(working: WorkingGraph) -> list[int]:
     rng = LcgRng()
 
     # Compute degree for random walk selection
-    degree: list[float] = [
+    degree = [
         sum(w for _, w in working.adj[u]) + 2.0 * working.self_loop[u]
         for u in range(n)
     ]
@@ -283,7 +283,7 @@ def _random_walk_init(working: WorkingGraph) -> list[int]:
             node = next_node
 
     # Assign label: neighbor with highest visit count
-    labels: list[int] = []
+    labels = []
     for u in range(n):
         best_neighbor = u
         best_visits = visits[u]

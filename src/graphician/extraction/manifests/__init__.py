@@ -257,14 +257,8 @@ def _extract_cargo_toml(
 
 
 def _parse_toml(content: str) -> dict[str, Any] | None:
-    """Parse TOML content. Uses stdlib tomllib on Python 3.11+, otherwise toml package."""
-    try:
-        import tomllib
-    except ImportError:
-        try:
-            import toml as tomllib
-        except ImportError:
-            return None
+    """Parse TOML content using the stdlib tomllib module."""
+    import tomllib
 
     try:
         return tomllib.loads(content)

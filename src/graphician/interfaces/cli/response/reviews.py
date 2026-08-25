@@ -150,7 +150,7 @@ def traverse_json(
             continue
 
         # Add neighbors to queue
-        neighbors = []
+        neighbors: list[Any] = []
         if direction in ("out", "both") and hasattr(graph, "out_neighbors"):
             neighbors.extend(n for n, _ in graph.out_neighbors(node_id))
         if direction in ("in", "both") and hasattr(graph, "in_neighbors"):
@@ -356,4 +356,4 @@ def _ids_match(node: Any, node_id: Any) -> bool:
     """Check if a node matches a node ID."""
     if not hasattr(node, "id"):
         return False
-    return node.id == node_id  # type: ignore[return-value]
+    return node.id == node_id

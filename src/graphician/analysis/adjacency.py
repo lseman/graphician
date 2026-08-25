@@ -19,7 +19,7 @@ from ..core.graph import Graph
 from ..core.id import NodeId
 
 if TYPE_CHECKING:
-    from scipy.sparse import csr_array  # type: ignore
+    from scipy.sparse import csr_array
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ class AdjacencyConfig:
     exclude_ambiguous: bool = True
 
     # Node filter (return False to exclude a node)
-    node_filter = None  # type: ignore
+    node_filter = None
 
     def __post_init__(self):
         if self.weights is None:
@@ -203,7 +203,7 @@ def build_scipy_adjacency(
             UserWarning, stacklevel=2,
         )
         # Return as tuple compatible with the function signature
-        return (None, nodes, node_to_idx)  # type: ignore
+        return (None, nodes, node_to_idx)
 
     row_ptr, col_idx, edge_weight, nodes, node_to_idx = build_adjacency_matrix(graph, config)
     n = len(nodes)

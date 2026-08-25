@@ -61,7 +61,7 @@ def graph_coverage(
     node_kinds = Counter(node.kind.value for _, node in nodes)
     edge_kinds = Counter(edge.kind.value for _, _, _, edge in edges)
 
-    connected_ids = set()
+    connected_ids: set[Any] = set()
     callers = set()
     callees = set()
     tested = set()

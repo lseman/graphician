@@ -261,7 +261,7 @@ def char_ngrams(token: str, min_n: int, max_n: int) -> list[str]:
 def token_pieces(token: str) -> list[str]:
     """Split a token into camelCase/snake_case pieces."""
     parts: list[str] = []
-    current = []
+    current: list[str] = []
     for c in token:
         if c == '_':
             if current:

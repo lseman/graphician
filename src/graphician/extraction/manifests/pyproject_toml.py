@@ -13,17 +13,9 @@ Creates PACKAGE nodes and DEPENDS_ON edges in the graph.
 from __future__ import annotations
 
 import logging
+import tomllib
 from pathlib import Path
 from typing import Any
-
-try:
-    import tomllib
-except ImportError:
-    # Python < 3.11
-    try:
-        import tomli as tomllib  # type: ignore[no-redef]
-    except ImportError:
-        tomllib = None  # type: ignore[assignment]
 
 from ...core.edge import Edge, EdgeKind
 from ...core.graph import Graph
@@ -42,10 +34,6 @@ def extract_pyproject_toml(path: Path, graph: Graph) -> dict[str, Any]:
     Returns:
         Summary dict with extracted data.
     """
-    if tomllib is None:
-        logger.warning("tomli/tomllib not available, skipping pyproject.toml extraction")
-        return {"error": "tomli/tomllib not available", "extracted": 0}
-
     try:
         content = path.read_text(encoding="utf-8")
     except OSError as e:

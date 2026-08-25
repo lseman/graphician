@@ -80,7 +80,7 @@ def find_impact(graph: Graph, query: ImpactQuery) -> list[ImpactHit]:
             next_via = (*via, edge.kind)
             heapq.heappush(heap, (new_cost, distance + 1, next_val, next_via))
 
-    hits: list[ImpactHit] = []
+    hits = []
     for nid_val, (cost, distance, via) in best.items():
         if nid_val == query.seed_id.value:
             continue

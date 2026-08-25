@@ -31,8 +31,8 @@ try:
     import html5lib
     from html5lib import HTMLParser
 except ImportError:
-    html5lib = None  # type: ignore[assignment]
-    HTMLParser = None  # type: ignore[assignment]
+    html5lib = None
+    HTMLParser = None
 
 from ...core.edge import Edge, EdgeKind
 from ...core.id import NodeId
@@ -283,7 +283,7 @@ def _collect_text(handle: Any, only_inline: bool) -> str:
 
 def _get_attrs(handle: Any) -> dict[str, str]:
     """Extract attributes from an element node."""
-    attrs = {}
+    attrs: dict[str, str] = {}
     attr_map = getattr(handle, "attributes", None)
     if attr_map is None:
         return attrs

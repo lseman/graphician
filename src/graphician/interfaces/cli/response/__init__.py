@@ -126,7 +126,7 @@ def _cache_key(db_path: str) -> str:
 def _load_cached(db_path: str) -> Graph | None:
     """Load graph from process-lifetime cache if DB unchanged."""
     key = _cache_key(db_path)
-    with _cache_lock:  # type: ignore[union-attr]
+    with _cache_lock:
         if key in _cache_data:
             mtime, graph = _cache_data[key]
         else:
@@ -144,7 +144,7 @@ def _load_cached(db_path: str) -> Graph | None:
 
 
 def _cache_put(db_path: str, graph: Graph) -> None:
-    with _cache_lock:  # type: ignore[union-attr]
+    with _cache_lock:
         _cache_data[_cache_key(db_path)] = (
             Path(db_path).stat().st_mtime,
             graph,

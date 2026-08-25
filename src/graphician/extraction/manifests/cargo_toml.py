@@ -10,13 +10,9 @@ Parses Cargo.toml files to extract:
 from __future__ import annotations
 
 import logging
+import tomllib
 from pathlib import Path
 from typing import Any
-
-try:
-    import tomllib
-except ImportError:
-    import tomli as tomllib  # type: ignore[import-not-found]
 
 from ...core.edge import Edge, EdgeKind
 from ...core.graph import Graph

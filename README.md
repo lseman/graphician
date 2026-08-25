@@ -197,4 +197,4 @@ See [GAP_ANALYSIS.md](GAP_ANALYSIS.md) for a detailed comparison.
 
 ## License
 
-Private / All rights reserved.
+MIT

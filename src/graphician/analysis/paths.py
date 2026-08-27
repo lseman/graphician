@@ -263,8 +263,8 @@ def _node_overlap(a: list[NodeId], b: list[NodeId]) -> float:
     """Jaccard overlap between two node lists."""
     if not a or not b:
         return 0.0
-    set_a = set(n.value for n in a)
-    set_b = set(n.value for n in b)
+    set_a = {n.value for n in a}
+    set_b = {n.value for n in b}
     intersection = len(set_a & set_b)
     union = len(set_a | set_b)
     return intersection / union if union > 0 else 0.0
@@ -285,21 +285,34 @@ def callees_of(graph: Graph, node_id: NodeId, max_hops: int = 6) -> list[NodeId]
     return _traverse(graph, node_id, EdgeKind.CALLS, max_hops)
 
 
-def callers_of(graph: Graph, node_id: NodeId, max_hops: int = 6) -> list[NodeId]:
+def callers_of(
+    graph: Graph,
+    node_id: NodeId,
+    max_hops: int = 6,
+    min_confidence: float = 0.5,
+) -> list[NodeId]:
     """Return all nodes that can reach *node_id* via ``Calls`` edges
-    (incoming ``Calls``)."""
+    (incoming ``Calls``).
+
+    Args:
+        graph: The code graph.
+        node_id: The target node to find callers for.
+        max_hops: Maximum traversal depth.
+        min_confidence: Minimum edge confidence to follow.  Ambiguous
+            edges (confidence ≈ 0) are always excluded.
+    """
     from .native import native_graph
 
     snapshot = native_graph(graph)
     if snapshot is not None:
         return [NodeId(value) for value in snapshot.traverse(
-            node_id.value, EdgeKind.CALLS.value, True, max_hops
+            node_id.value, EdgeKind.CALLS.value, True, max_hops, min_confidence
         )]
 
     visited: set[int] = {node_id.value}
     queue: deque[int] = deque()
     for prev, edge in graph.in_neighbors(node_id):
-        if edge.kind == EdgeKind.CALLS:
+        if edge.kind == EdgeKind.CALLS and edge.confidence.score() >= min_confidence:
             queue.append(prev.value)
     results: list[NodeId] = []
     while queue:
@@ -310,7 +323,9 @@ def callers_of(graph: Graph, node_id: NodeId, max_hops: int = 6) -> list[NodeId]
         results.append(NodeId(nid))
         for prev, edge in graph.in_neighbors(NodeId(nid)):
             pval = prev.value if isinstance(prev, NodeId) else prev
-            if edge.kind == EdgeKind.CALLS and pval not in visited:
+            if (edge.kind == EdgeKind.CALLS
+                    and edge.confidence.score() >= min_confidence
+                    and pval not in visited):
                 queue.append(pval)
     return results
 

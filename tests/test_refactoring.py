@@ -156,17 +156,30 @@ class TestIsEntryPoint:
         n = Node.new(NodeKind.FUNCTION, "main")
         assert is_entry_point(n)
         assert is_entry_point(Node.new(NodeKind.FUNCTION, "main_"))
-        assert is_entry_point(Node.new(NodeKind.FUNCTION, "run_main"))
+        # run_main is NOT an entry point — it's a regular function.
+        # The old endswith logic incorrectly matched it; fixed.
+        assert not is_entry_point(Node.new(NodeKind.FUNCTION, "run_main"))
+        # username, domain, etc. must also NOT match.
+        assert not is_entry_point(Node.new(NodeKind.FUNCTION, "username"))
 
     def test_suffix_patterns(self):
-        # The Rust reference checks suffix patterns, not prefix
         assert is_entry_point(Node.new(NodeKind.FUNCTION, "some_test_"))
         assert is_entry_point(Node.new(NodeKind.FUNCTION, "Test"))
-        assert not is_entry_point(Node.new(NodeKind.FUNCTION, "test_foo"))  # prefix, not suffix
+        assert not is_entry_point(Node.new(NodeKind.FUNCTION, "test_foo"))
+        # Prefix patterns that look like entry points but aren't.
+        assert not is_entry_point(Node.new(NodeKind.FUNCTION, "start_server"))
+        assert not is_entry_point(Node.new(NodeKind.FUNCTION, "serve_request"))
 
     def test_not_entry(self):
         assert not is_entry_point(Node.new(NodeKind.FUNCTION, "helper"))
         assert not is_entry_point(Node.new(NodeKind.FUNCTION, "compute"))
+
+    def test_methods_not_entry(self):
+        # Methods should never be entry points.
+        method = Node.new(NodeKind.METHOD, "main")
+        assert not is_entry_point(method)
+        method2 = Node.new(NodeKind.METHOD, "run")
+        assert not is_entry_point(method2)
 
 
 class TestIsTestFile:

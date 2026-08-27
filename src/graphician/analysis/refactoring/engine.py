@@ -119,10 +119,13 @@ def rename_preview(graph: Graph, qname: str, new_name: str) -> RenamePreview | N
 # ── Dead Code Detection ───────────────────────────────────────────────────
 
 _ENTRY_POINT_PATTERNS = [
-    "main", "main_", "test_", "Test", "Handle", "handle_",
-    "serve", "run", "start", "entry", "init", "setup", "new",
-    "default",
+    "main", "main_", "Test", "Handle", "handle_",
+    "serve", "start", "entry", "init", "setup", "default",
 ]
+
+# Exact names that are entry points when they appear as top-level
+# functions (not methods, not suffixed names).
+_ENTRY_POINT_EXACT = {"main", "start", "serve", "run"}
 
 _FRAMEWORK_SUFFIXES = [
     "Stack", "Construct", "Resource", "Pipeline", "Model",
@@ -137,11 +140,35 @@ _TEST_FILE_PATTERNS = [
 
 
 def is_entry_point(node: Node, patterns: list[str] | None = None) -> bool:
-    """Check if a node looks like an entry point by name."""
+    """Check if a node looks like an entry point by name.
+
+    Only top-level functions (not methods) with entry-point name patterns
+    are considered.  This avoids false positives like ``username``,
+    ``run_test``, ``new_user``, ``default_value``, etc.
+    """
     if patterns is None:
         patterns = _ENTRY_POINT_PATTERNS
     name = node.name
-    return any(name == pattern or name.endswith(pattern) for pattern in patterns)
+    # Only top-level functions qualify — methods are never entry points.
+    if node.kind != NodeKind.FUNCTION:
+        return False
+    # Exact match on known entry-point names.
+    if name in _ENTRY_POINT_EXACT:
+        return True
+    lower = name.lower()
+    # Suffix match for test-related patterns (e.g. `some_test_`).
+    if lower.endswith("test_") or lower.endswith("test"):
+        return True
+    for pattern in patterns:
+        pl = pattern.lower()
+        # Prefix match for structural entry patterns.
+        if pl in ("main_", "entry_", "handle", "handle_"):
+            if lower.startswith(pl):
+                return True
+        # "Test" as exact match.
+        if name == "Test":
+            return True
+    return False
 
 
 def is_framework_inherited(node: Node, inherited_classes: set[NodeId]) -> bool:
@@ -177,13 +204,17 @@ def find_dead_code(
     imported_nodes: set[NodeId] = set()
     tested_nodes: set[NodeId] = set()
     inherited_classes: set[NodeId] = set()
+    referenced_nodes: set[NodeId] = set()
 
     for _, src, dst, edge in graph.edges():
         if edge.kind == EdgeKind.CALLS:
-            called_nodes.add(src)
+            # Only the callee (dst) is "called" — the caller (src) is not.
             called_nodes.add(dst)
+            # The caller is referenced by the call relationship.
+            referenced_nodes.add(src)
         elif edge.kind == EdgeKind.IMPORTS:
             imported_nodes.add(dst)
+            referenced_nodes.add(src)
         elif edge.kind == EdgeKind.TESTED_BY:
             tested_nodes.add(src)
             tested_nodes.add(dst)
@@ -194,8 +225,9 @@ def find_dead_code(
             inherited_classes.add(src)
             inherited_classes.add(dst)
         else:
-            inherited_classes.add(src)
-            inherited_classes.add(dst)
+            # Data-flow, depends-on, etc. — both ends are referenced.
+            referenced_nodes.add(src)
+            referenced_nodes.add(dst)
 
     # Filter nodes: find candidates with no callers and no references
     dead: list[tuple[NodeId, Node]] = []
@@ -208,7 +240,7 @@ def find_dead_code(
         if node.qualified_name.startswith("call::"):
             continue
 
-        # Skip if called
+        # Skip if called (appears as dst of a Calls edge)
         if nid in called_nodes:
             continue
 
@@ -230,6 +262,10 @@ def find_dead_code(
 
         # Skip if it's in a test file
         if is_test_file(node):
+            continue
+
+        # Skip if referenced (caller, importer, data-flow participant)
+        if nid in referenced_nodes:
             continue
 
         dead.append((nid, node))

@@ -582,6 +582,8 @@ def _call_neighbors(
     for neighbor_id, edge in iterator:
         if edge.kind is not EdgeKind.CALLS:
             continue
+        if edge.confidence.score() < 0.5:
+            continue
         node = graph.node(neighbor_id)
         if node is not None:
             hits.append({

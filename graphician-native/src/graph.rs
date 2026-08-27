@@ -104,15 +104,16 @@ impl NativeGraph {
         crate::analysis::centrality::pagerank(self, damping, iterations, seeds.as_deref())
     }
 
-    #[pyo3(signature = (start, edge_kind=None, reverse=false, max_hops=6))]
+    #[pyo3(signature = (start, edge_kind=None, reverse=false, max_hops=6, min_confidence=0.0))]
     pub fn traverse(
         &self,
         start: u64,
         edge_kind: Option<&str>,
         reverse: bool,
         max_hops: usize,
+        min_confidence: f32,
     ) -> PyResult<Vec<u64>> {
-        crate::analysis::traversal::traverse(self, start, edge_kind, reverse, max_hops)
+        crate::analysis::traversal::traverse(self, start, edge_kind, reverse, max_hops, min_confidence)
     }
 
     #[pyo3(signature = (start, target=None, max_hops=6, edge_kinds=None, min_confidence=0.0))]

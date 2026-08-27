@@ -20,6 +20,7 @@ pub(crate) fn traverse(
     edge_kind: Option<&str>,
     reverse: bool,
     max_hops: usize,
+    min_confidence: f32,
 ) -> PyResult<Vec<u64>> {
     let start = start_index(graph, start)?;
     let adjacency = if reverse {
@@ -36,7 +37,13 @@ pub(crate) fn traverse(
             continue;
         }
         for edge in &adjacency[node] {
-            if edge_kind.is_some_and(|kind| edge.kind != kind) || visited[edge.target] {
+            if edge_kind.is_some_and(|kind| edge.kind != kind) {
+                continue;
+            }
+            if edge.confidence < min_confidence {
+                continue;
+            }
+            if visited[edge.target] {
                 continue;
             }
             visited[edge.target] = true;

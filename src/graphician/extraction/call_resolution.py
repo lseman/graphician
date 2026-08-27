@@ -750,11 +750,11 @@ def _resolve_call_placeholders_python(graph: Graph) -> int:
             scored.append((cand, in_calls))
 
         max_score = max((s for _, s in scored), default=0)
-        # Require: (1) at least 3 incoming calls to be considered
+        # Require: (1) at least 2 incoming calls to be considered
         # popular enough, (2) winner must have at least 2x the
         # runner-up to avoid picking stdlib functions that barely
         # edge out project functions with the same name.
-        if max_score >= 3:
+        if max_score >= 2:
             runners_up = [s for _, s in scored if s < max_score]
             runner_up_score = max(runners_up, default=0)
             if max_score >= runner_up_score * 2:

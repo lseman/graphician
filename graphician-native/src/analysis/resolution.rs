@@ -414,11 +414,11 @@ pub fn plan_call_resolution(
                 .map(|(_, s)| *s)
                 .max()
                 .unwrap_or(0);
-            // Require: (1) at least 3 incoming calls to be considered
+            // Require: (1) at least 2 incoming calls to be considered
             // popular enough, (2) winner must have at least 2x the
             // runner-up to avoid picking stdlib functions that barely
             // edge out project functions with the same name.
-            if max_score >= 3 {
+            if max_score >= 2 {
                 let runners_up: Vec<_> = scored
                     .iter()
                     .copied()

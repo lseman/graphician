@@ -162,9 +162,8 @@ def is_entry_point(node: Node, patterns: list[str] | None = None) -> bool:
     for pattern in patterns:
         pl = pattern.lower()
         # Prefix match for structural entry patterns.
-        if pl in ("main_", "entry_", "handle", "handle_"):
-            if lower.startswith(pl):
-                return True
+        if pl in ("main_", "entry_", "handle", "handle_") and lower.startswith(pl):
+            return True
         # "Test" as exact match.
         if name == "Test":
             return True

@@ -1,4 +1,10 @@
-# Graphician
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/lseman/graphician/master/static/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/lseman/graphician/master/static/logo-light.svg">
+    <img src="https://raw.githubusercontent.com/lseman/graphician/master/static/logo-light.svg" alt="Graphician" width="340">
+  </picture>
+</p>
 
 A **local-first code graph** for navigating, reviewing, and reasoning about a codebase.
 
@@ -6,9 +12,9 @@ Graphician parses source code across multiple languages, builds a typed property
 
 ## Pipeline
 
-![Graphician pipeline](static/graphician.svg)
+![Graphician pipeline](https://raw.githubusercontent.com/lseman/graphician/master/static/graphician.svg)
 
-Source code is parsed by tree-sitter into an AST, assembled into a property graph (~10K nodes, ~25K edges), and exposed through a CLI or JSON tool API for structural analysis.
+Source code is parsed by tree-sitter into an AST, assembled into a property graph, and exposed through a CLI or JSON tool API for structural analysis.
 
 ## Features
 

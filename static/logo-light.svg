@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 388 80" fill="none" role="img" aria-label="graphician — a local-first code graph">
+  <defs>
+    <linearGradient id="gl-edge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="gl-hit" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Mark: a small code graph traversal. Edges lead the eye left-to-right
+       and terminate on a highlighted node — the answer to a structural query. -->
+  <g transform="translate(12, 6)" fill="none">
+    <!-- edges -->
+    <g stroke="url(#gl-edge)" stroke-width="4" stroke-linecap="round">
+      <path d="M14 40 L38 14"/>
+      <path d="M14 40 L38 54"/>
+      <path d="M38 14 L38 54"/>
+      <path d="M38 14 L64 34"/>
+      <path d="M38 54 L64 34"/>
+    </g>
+    <!-- graph nodes: filled core + halo so edges read cleanly into them -->
+    <g>
+      <circle cx="14" cy="40" r="6.5" fill="#0f172a"/>
+      <circle cx="38" cy="14" r="6.5" fill="#0f172a"/>
+      <circle cx="38" cy="54" r="6.5" fill="#0f172a"/>
+    </g>
+    <!-- the hit -->
+    <circle cx="64" cy="34" r="8" fill="url(#gl-hit)"/>
+  </g>
+
+  <text x="102" y="46" font-family="ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="34" font-weight="700" fill="#0f172a" letter-spacing="-0.8">graphician</text>
+  <text x="104" y="64" font-family="ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11.5" font-weight="500" fill="#64748b" letter-spacing="0.4">a local-first code graph</text>
+</svg>

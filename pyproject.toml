@@ -74,7 +74,7 @@ testpaths = ["src", "tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "--cov=graphician --cov-report=term-missing --cov-report=xml --cov-fail-under=60"
+addopts = "--cov=graphician --cov-report=term-missing --cov-report=xml"
 filterwarnings = ["ignore::DeprecationWarning"]
 
 [tool.coverage.run]

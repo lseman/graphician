@@ -430,60 +430,14 @@ pub fn should_suppress_call_placeholder(name: &str) -> bool {
     )
 }
 
-/// Common short English verbs/nouns that dominate noise in *most*
-/// codebases as stdlib/fluent-API calls, but collide with real method
-/// names often enough (`Repository::select`, `Service::execute`,
-/// `Config::merge`) that they must not be dropped before the project's
-/// symbol table exists.
-pub fn is_generic_name(name: &str) -> bool {
-    let name = name.trim();
-    if name.is_empty() {
-        return true;
-    }
-    let lower = name.to_ascii_lowercase();
-    matches!(
-        lower.as_str(),
-        "find"
-            | "select"
-            | "execute"
-            | "merge"
-            | "load"
-            | "write"
-            | "read"
-            | "path"
-            | "string"
-            | "index"
-            | "take"
-            | "has"
-            | "display"
-            | "now"
-            | "entry"
-            | "default"
-            | "count"
-            | "first"
-            | "last"
-            | "position"
-            | "split"
-            | "replace"
-            | "clear"
-            | "values"
-            | "node"
-            | "text"
-            | "parse"
-            | "kind"
-            | "parent"
-            | "language"
-            | "status"
-            | "watch"
-            | "commit"
-            | "block"
-            | "attr"
-    )
-}
-
-/// Combined suppression: strict list or generic name.
+/// Combined suppression: strict list only.
+/// Generic names (find, select, execute, etc.) are no longer suppressed
+/// at extraction time — they pass through as call placeholders and are
+/// resolved by the call resolution system instead. This prevents losing
+/// legitimate project functions like `Repository::select` or
+/// `Service::execute`.
 pub fn should_suppress(name: &str) -> bool {
-    should_suppress_call_placeholder(name) || is_generic_name(name)
+    should_suppress_call_placeholder(name)
 }
 
 /// Import text capped at 10KB to bound memory for large nodes.

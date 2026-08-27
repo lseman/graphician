@@ -539,7 +539,7 @@ def _infomap_local_move(
         for u in range(n):
             old = current[u]
             # Collect neighbor communities, sorted for deterministic tie-break
-            neighbor_comms = sorted(set(labels[v_idx] for v_idx, _ in working.adj[u]))
+            neighbor_comms = sorted({labels[v_idx] for v_idx, _ in working.adj[u]})
             best_new = old
             best_delta = 0.0
 

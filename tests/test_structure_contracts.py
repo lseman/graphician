@@ -29,7 +29,7 @@ def _edge(graph: Graph, source, target, kind=EdgeKind.CALLS):
 
 def test_structural_cycles_cores_bridges_and_articulation_points() -> None:
     graph = Graph()
-    a, b, c, tail = [_node(graph, name) for name in ("a", "b", "c", "tail")]
+    a, b, c, tail = (_node(graph, name) for name in ("a", "b", "c", "tail"))
     _edge(graph, a, b)
     _edge(graph, b, c)
     _edge(graph, c, a)
@@ -64,7 +64,7 @@ def test_structural_self_loop_empty_and_ranked_queries() -> None:
 
 def test_motif_detection_covers_diamond_feedback_fan_in_and_fan_out() -> None:
     graph = Graph()
-    a, b, c, d, e = [_node(graph, name) for name in ("a", "b", "c", "d", "e")]
+    a, b, c, d, e = (_node(graph, name) for name in ("a", "b", "c", "d", "e"))
     for source, target in ((a, b), (a, c), (b, d), (c, d), (b, a), (e, d), (a, e)):
         _edge(graph, source, target)
 

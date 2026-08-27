@@ -75,4 +75,3 @@ def graph_freshness(store: GraphStore) -> dict[str, Any]:
             "sample_deleted": deleted[:sample_limit],
         },
     }
-

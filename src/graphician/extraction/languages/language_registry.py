@@ -346,5 +346,5 @@ def normalize_extension(ext: str) -> str:
 
 def normalize_extensions(extensions: list[str]) -> list[str]:
     """Normalize a list of extensions (dedup, sort)."""
-    normalized = sorted(set(normalize_extension(e) for e in extensions if e.strip(".")))
+    normalized = sorted({normalize_extension(e) for e in extensions if e.strip(".")})
     return normalized

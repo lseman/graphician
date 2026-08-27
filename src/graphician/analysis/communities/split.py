@@ -84,7 +84,7 @@ def split_oversized(
 
 def _build_subgraph(graph: Graph, member_ids: list[NodeId]) -> Graph:
     """Build a subgraph containing only the specified members and edges between them."""
-    member_set = set(nid.value for nid in member_ids)
+    member_set = {nid.value for nid in member_ids}
     node_map: dict[NodeId, NodeId] = {}
 
     sub_graph = Graph()

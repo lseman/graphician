@@ -107,7 +107,7 @@ def deduplicate_nodes(
 
     # Step 2: Jaro-Winkler refinement on LSH candidates
     candidates: list[tuple[NodeId, NodeId, float]] = []
-    seen_ids: set[NodeId] = set(nid for nid in node_ids if nid in eligible_ids)
+    seen_ids: set[NodeId] = {nid for nid in node_ids if nid in eligible_ids}
 
     for id_a, id_b, _jaccard in lsh_candidates:
         if id_a not in eligible_ids or id_b not in eligible_ids:

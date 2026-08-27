@@ -110,4 +110,3 @@ def _stamp_provenance(edge: Edge, provider: str, detail: str | None) -> None:
     edge.properties["provider"] = provider
     if detail is not None:
         edge.properties["evidence_detail"] = detail
-

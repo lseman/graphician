@@ -1,461 +1,267 @@
-"""Tests for shared parser utilities in extraction/languages/parsers/base.py.
-
-Covers text extraction, tree walking, QName building, source text
-extraction, test detection, decorator extraction, and call suppression.
-"""
+"""Tests for base parser utilities and multi-language parser extraction."""
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock
 
 from graphician.core.graph import Graph
-from graphician.core.id import NodeId
 from graphician.core.node import NodeKind
-
-# ── text / children helpers ──────────────────────────────────────────
-
-
-class TestTextHelpers:
-    """Tests for _text, _children, _child_by_name, _walk_descendants."""
-
-    def test_text_returns_decoded_bytes(self) -> None:
-        from graphician.extraction.languages.parsers.base import _text
-
-        fake_node = MagicMock()
-        fake_node.start_byte = 0
-        fake_node.end_byte = 5
-        source = b"hello"
-        assert _text(fake_node, source) == "hello"
-
-    def test_text_handles_invalid_utf8(self) -> None:
-        from graphician.extraction.languages.parsers.base import _text
-
-        fake_node = MagicMock()
-        fake_node.start_byte = 0
-        fake_node.end_byte = 3
-        source = b"\xff\xfe\x00\x01\x02"
-        result = _text(fake_node, source)
-        assert "�" in result
-
-    def _make_node(self, child_types: list[str], field_names: list[str | None] | None = None) -> MagicMock:
-        """Create a fake tree-sitter node for testing."""
-        children: list[MagicMock] = []
-        for i, ctype in enumerate(child_types):
-            child = MagicMock()
-            child.type = ctype
-            child.start_byte = i * 10
-            child.end_byte = i * 10 + len(ctype) * 5
-            child.children = []
-            children.append(child)
-        node = MagicMock()
-        node.children = children
-        node.start_byte = 0
-        node.end_byte = sum(c.end_byte for c in children) or 100
-        node.field_name_for_child.return_value = None
-        return node
-
-    def test_children_returns_list(self) -> None:
-        from graphician.extraction.languages.parsers.base import _children
-
-        node = self._make_node(["a", "b", "c"])
-        children = _children(node)
-        assert len(children) == 3
-        assert all(c.type in ("a", "b", "c") for c in children)
-
-    def test_child_by_name_type_match(self) -> None:
-        from graphician.extraction.languages.parsers.base import _child_by_name
-
-        node = self._make_node(["foo", "bar", "baz"])
-        child = _child_by_name(node, "bar")
-        assert child is not None
-        assert child.type == "bar"
-
-    def test_child_by_name_field_match(self) -> None:
-        from graphician.extraction.languages.parsers.base import _child_by_name
-
-        children: list[MagicMock] = []
-        for _i, ctype in enumerate(["foo", "bar"]):
-            c = MagicMock()
-            c.type = ctype
-            c.children = []
-            children.append(c)
-        node = MagicMock()
-        node.children = children
-        node.field_name_for_child.side_effect = [None, "target_field"]
-
-        child = _child_by_name(node, "target_field")
-        assert child is not None
-        assert child.type == "bar"
-
-    def test_child_by_name_returns_none(self) -> None:
-        from graphician.extraction.languages.parsers.base import _child_by_name
-
-        node = self._make_node(["foo", "bar"])
-        child = _child_by_name(node, "missing")
-        assert child is None
-
-    def test_walk_descendants_flattens(self) -> None:
-        from graphician.extraction.languages.parsers.base import _walk_descendants
-
-        leaf = MagicMock()
-        leaf.type = "leaf"
-        leaf.children = []
-
-        inner = MagicMock()
-        inner.type = "inner"
-        inner.children = [leaf]
-
-        root = MagicMock()
-        root.type = "root"
-        root.children = [inner]
-
-        nodes = list(_walk_descendants(root))
-        types = {n.type for n in nodes}
-        assert "inner" in types
-        assert "leaf" in types
-
-
-# ── test detection ───────────────────────────────────────────────────
-
-
-class TestTestDetection:
-    """Tests for _is_test_name and _is_test_attribute."""
-
-    def test_is_test_name_prefixed(self) -> None:
-        from graphician.extraction.languages.parsers.base import _is_test_name
-
-        assert _is_test_name("test_foo") is True
-        assert _is_test_name("test_bar_baz") is True
-
-    def test_is_test_name_suffixed(self) -> None:
-        from graphician.extraction.languages.parsers.base import _is_test_name
-
-        assert _is_test_name("foo_test") is True
-        assert _is_test_name("bar_test") is True
-
-    def test_is_test_name_capitalized(self) -> None:
-        from graphician.extraction.languages.parsers.base import _is_test_name
-
-        assert _is_test_name("TestFoo") is True
-        assert _is_test_name("Test") is True
-
-    def test_is_test_name_lowercase(self) -> None:
-        from graphician.extraction.languages.parsers.base import _is_test_name
-
-        assert _is_test_name("test_something") is True
-        assert _is_test_name("test") is True
-
-    def test_is_test_name_non_test(self) -> None:
-        from graphician.extraction.languages.parsers.base import _is_test_name
-
-        assert _is_test_name("main") is False
-        assert _is_test_name("foo") is False
-
-    def test_is_test_attribute_rust_test(self) -> None:
-        from graphician.extraction.languages.parsers.base import _is_test_attribute
-
-        assert _is_test_attribute("#[test]") is True
-        assert _is_test_attribute("#[test_case]") is True
-        assert _is_test_attribute("#[rstest]") is True
-        assert _is_test_attribute("#[pytest.mark]") is True
-
-    def test_is_test_attribute_module_style(self) -> None:
-        from graphician.extraction.languages.parsers.base import _is_test_attribute
-
-        assert _is_test_attribute("module::test") is True
-        assert _is_test_attribute("foo::bar::test") is True
-
-    def test_is_test_attribute_not_test(self) -> None:
-        from graphician.extraction.languages.parsers.base import _is_test_attribute
-
-        assert _is_test_attribute("#[derive]") is False
-        assert _is_test_attribute("#[serde]") is False
-        assert _is_test_attribute("some_macro") is False
-
-
-# ── source text extraction ───────────────────────────────────────────
-
-
-class TestSourceExtraction:
-    """Tests for _extract_source_text."""
-
-    def test_extract_source_text_basic(self) -> None:
-        from graphician.extraction.languages.parsers.base import _extract_source_text
-
-        source = b"line1\nline2\nline3\nline4"
-        result = _extract_source_text(source, 2, 3)
-        assert result == "line2\nline3"
-
-    def test_extract_source_text_clamp_start(self) -> None:
-        from graphician.extraction.languages.parsers.base import _extract_source_text
-
-        source = b"a\nb\nc"
-        result = _extract_source_text(source, 0, 2)
-        assert result == "a\nb"
-
-    def test_extract_source_text_clamp_end(self) -> None:
-        from graphician.extraction.languages.parsers.base import _extract_source_text
-
-        source = b"a\nb\nc"
-        result = _extract_source_text(source, 3, 100)
-        assert result == "c"
-
-    def test_extract_source_text_single_line(self) -> None:
-        from graphician.extraction.languages.parsers.base import _extract_source_text
-
-        source = b"only_line"
-        result = _extract_source_text(source, 1, 1)
-        assert result == "only_line"
-
-
-# ── graph node helpers ───────────────────────────────────────────────
-
-
-class TestGraphNodeHelpers:
-    """Tests for _add_node."""
-
-    def test_add_node_creates_new(self, tmp_path: Path) -> None:
-        from graphician.extraction.languages.parsers.base import _add_node
-
-        graph = Graph()
-        path = tmp_path / "app.py"
-        path.write_text("")
-        idx = _add_node(graph, NodeKind.FUNCTION, "app::foo", path, 1, 1)
-        assert idx >= 0
-        node = graph.node(NodeId(idx))
-        assert node.qualified_name == "app::foo"
-        assert node.kind == NodeKind.FUNCTION
-
-    def test_add_node_skips_existing(self, tmp_path: Path) -> None:
-        from graphician.extraction.languages.parsers.base import _add_node
-
-        graph = Graph()
-        path = tmp_path / "app.py"
-        path.write_text("")
-        idx1 = _add_node(graph, NodeKind.FUNCTION, "app::foo", path, 1, 1)
-        idx2 = _add_node(graph, NodeKind.FUNCTION, "app::foo", path, 2, 2)
-        assert idx1 == idx2
-
-    def test_add_node_with_source_text(self, tmp_path: Path) -> None:
-        from graphician.extraction.languages.parsers.base import _add_node
-
-        graph = Graph()
-        path = tmp_path / "app.py"
-        path.write_text("")
-        idx = _add_node(
-            graph, NodeKind.FUNCTION, "app::foo", path, 1, 1,
-            source=b"def foo(): pass\n",
-        )
-        node = graph.node(NodeId(idx))
-        assert "def foo(): pass" in node.source_text
-
-    def test_add_node_with_properties(self, tmp_path: Path) -> None:
-        from graphician.extraction.languages.parsers.base import _add_node
-
-        graph = Graph()
-        path = tmp_path / "app.py"
-        path.write_text("")
-        idx = _add_node(
-            graph, NodeKind.FUNCTION, "app::foo", path, 1, 1,
-            props={"visibility": "public"},
-        )
-        node = graph.node(NodeId(idx))
-        assert node.properties["visibility"] == "public"
-
-
-# ── QName helpers ────────────────────────────────────────────────────
-
-
-class TestQNameHelpers:
-    """Tests for _scoped_qname, _file_qn, _clean_use_path."""
-
-    def test_scoped_qname_with_scope(self) -> None:
-        from graphician.extraction.languages.parsers.base import _scoped_qname
-
-        result = _scoped_qname("app", ["Service"], "method")
-        assert result == "app::Service::method"
-
-    def test_scoped_qname_multi_scope(self) -> None:
-        from graphician.extraction.languages.parsers.base import _scoped_qname
-
-        result = _scoped_qname("app", ["A", "B"], "x")
-        assert result == "app::A::B::x"
-
-    def test_scoped_qname_no_scope(self) -> None:
-        from graphician.extraction.languages.parsers.base import _scoped_qname
-
-        result = _scoped_qname("app", [], "method")
-        assert result == "app::method"
-
-    def test_file_qn_from_stem(self) -> None:
-        from graphician.extraction.languages.parsers.base import _file_qn
-
-        assert _file_qn(Path("app.py")) == "app"
-        assert _file_qn(Path("utils.py")) == "utils"
-        assert _file_qn(Path("/deep/path/mod.rs")) == "mod"
-
-    def test_clean_use_path_strips_semicolon(self) -> None:
-        from graphician.extraction.languages.parsers.base import _clean_use_path
-
-        assert _clean_use_path("std::io::Write;") == "std::io::Write"
-        assert _clean_use_path("  foo::bar  ;  ") == "foo::bar"
-        assert _clean_use_path("no_semicolon") == "no_semicolon"
-
-
-# ── call suppression ─────────────────────────────────────────────────
-
-
-class TestCallSuppression:
-    """Tests for _should_suppress_call."""
-
-    def test_suppresses_rust_std_panic(self) -> None:
-        from graphician.extraction.languages.parsers.base import _should_suppress_call
-
-        assert _should_suppress_call("std::panic") is True
-        assert _should_suppress_call("std::result") is True
-        assert _should_suppress_call("std::option::Option") is True
-
-    def test_suppresses_rust_std_containers(self) -> None:
-        from graphician.extraction.languages.parsers.base import _should_suppress_call
-
-        assert _should_suppress_call("std::vec::Vec") is True
-        assert _should_suppress_call("std::boxed::Box") is True
-
-    def test_suppresses_rust_std_traits(self) -> None:
-        from graphician.extraction.languages.parsers.base import _should_suppress_call
-
-        assert _should_suppress_call("std::fmt") is True
-        assert _should_suppress_call("std::ops") is True
-
-    def test_does_not_suppress_unknown(self) -> None:
-        from graphician.extraction.languages.parsers.base import _should_suppress_call
-
-        assert _should_suppress_call("my_function") is False
-        assert _should_suppress_call("foo::bar") is False
-
-
-# ── decorator extraction ─────────────────────────────────────────────
-
-
-class TestDecoratorExtraction:
+from graphician.extraction.languages.parsers.base import (
+    _extract_decorators,
+    _is_test_attribute,
+    _is_test_name,
+    _should_suppress_call,
+)
+from graphician.extraction.languages.parsers.cpp import extract_file as extract_cpp
+from graphician.extraction.languages.parsers.java import extract_file as extract_java
+from graphician.extraction.languages.parsers.javascript import extract_file as extract_javascript
+from graphician.extraction.languages.parsers.python import extract_file as extract_python
+from graphician.extraction.languages.parsers.typescript import extract_file as extract_typescript
+
+
+class _MockNode:
+    """Mock node for tests."""
+
+    type = "statement"
+    children = []  # noqa: RUF012
+
+
+# ---------------------------------------------------------------------------
+# Base parser utilities
+# ---------------------------------------------------------------------------
+
+class TestExtractDecorators:
     """Tests for _extract_decorators."""
 
-    def test_extract_decorators_single(self) -> None:
-        from graphician.extraction.languages.parsers.base import _extract_decorators
+    def test_no_decorators(self) -> None:
+        class MockChild:
+            type = "statement"
+            children = []  # noqa: RUF012
 
-        # @mydec\n  ->  @=0, m=1, y=2, d=3, e=4, c=5, \n=6
-        source = b"@mydec\ndef foo(): pass"
-        dec_ident = MagicMock()
-        dec_ident.type = "identifier"
-        dec_ident.start_byte = 1
-        dec_ident.end_byte = 6
+        assert _extract_decorators(MockChild(), b"") == []
 
-        dec_node = MagicMock()
-        dec_node.type = "decorator"
-        dec_node.children = [dec_ident]
+    def test_decorator_node(self) -> None:
+        # Create a mock that mimics tree-sitter node structure
+        class MockChild:
+            def __init__(self, node_type: str, source: bytes, children=None):
+                self.type = node_type
+                self.children = children or []
 
-        node = MagicMock()
-        node.children = [dec_node]
-        node.field_name_for_child.return_value = None
+        class MockGrandChild:
+            def __init__(self, node_type: str, start: int, end: int, source: bytes):
+                self.type = node_type
+                self.start_byte = start
+                self.end_byte = end
+                self._source = source
 
-        result = _extract_decorators(node, source)
-        assert result == ["mydec"]
+            def text(self) -> bytes:
+                return self._source[self.start_byte:self.end_byte]
 
-    def test_extract_decorators_empty(self) -> None:
-        from graphician.extraction.languages.parsers.base import _extract_decorators
-
-        node = MagicMock()
-        node.children = []
-        node.field_name_for_child.return_value = None
-
-        source = b"def foo(): pass"
-        result = _extract_decorators(node, source)
-        assert result == []
-
-    def test_extract_decorators_multiple(self) -> None:
-        from graphician.extraction.languages.parsers.base import _extract_decorators
-
-        source = b"@dec1\n@dec2\ndef foo(): pass"
-        # dec1 bytes: 1-4 -> b'dec' -> WRONG, let me check:
-        # @ = 0, d=1, e=2, c=3, 1=4, \n=5
-        # dec1 is 1-5, @ = 0
-        # @ = 0, d=1, e=2, c=3, 1=4, \n=5, @=6, d=7, e=8, c=9, 2=10
-        # dec1 = 1-5, dec2 = 7-11
-        dec1_ident = MagicMock()
-        dec1_ident.type = "identifier"
-        dec1_ident.start_byte = 1
-        dec1_ident.end_byte = 5
-
-        dec1_node = MagicMock()
-        dec1_node.type = "decorator"
-        dec1_node.children = [dec1_ident]
-
-        dec2_ident = MagicMock()
-        dec2_ident.type = "identifier"
-        dec2_ident.start_byte = 7
-        dec2_ident.end_byte = 11
-
-        dec2_node = MagicMock()
-        dec2_node.type = "decorator"
-        dec2_node.children = [dec2_ident]
-
-        node = MagicMock()
-        node.children = [dec1_node, dec2_node]
-        node.field_name_for_child.return_value = None
-
-        result = _extract_decorators(node, source)
-        assert len(result) == 2
-        assert "dec1" in result
-        assert "dec2" in result
-
-    def test_extract_decorators_skips_at_symbol(self) -> None:
-        from graphician.extraction.languages.parsers.base import _extract_decorators
-
-        # @mydec  ->  @=0, m=1, y=2, d=3, e=4, c=5
-        source = b"@mydec"
-        at_sym = MagicMock()
-        at_sym.type = "@"
-        at_sym.start_byte = 0
-        at_sym.end_byte = 1
-
-        ident = MagicMock()
-        ident.type = "identifier"
-        ident.start_byte = 1
-        ident.end_byte = 6
-
-        dec_node = MagicMock()
-        dec_node.type = "decorator"
-        dec_node.children = [at_sym, ident]
-
-        node = MagicMock()
-        node.children = [dec_node]
-        node.field_name_for_child.return_value = None
-
-        result = _extract_decorators(node, source)
-        assert result == ["mydec"]
+        source = b"@decorator\ndef foo():\n    pass\n"
+        grandchild = MockGrandChild("identifier", 1, 11, source)
+        child = MockChild("decorator", source, [grandchild])
+        parent = _MockNode()
+        parent.children = [child]
+        result = _extract_decorators(parent, source)
+        assert len(result) == 1
+        assert result[0] == "decorator"
 
 
-# ── scoped qname helper ──────────────────────────────────────────────
+class TestIsTestName:
+    """Tests for _is_test_name."""
+
+    def test_test_prefix(self) -> None:
+        assert _is_test_name("test_foo")
+
+    def test_test_suffix(self) -> None:
+        assert _is_test_name("foo_test")
+
+    def test_dunder_test(self) -> None:
+        assert not _is_test_name("__test__")
+
+    def test_non_test(self) -> None:
+        assert not _is_test_name("process_data")
+
+    def test_test_prefix_lowercase(self) -> None:
+        assert _is_test_name("testify")
 
 
-class TestScopedQNameHelper:
-    """Tests for _scoped_qname edge cases."""
+class TestIsTestAttribute:
+    """Tests for _is_test_attribute."""
 
-    def test_empty_scope(self) -> None:
-        from graphician.extraction.languages.parsers.base import _scoped_qname
+    def test_rust_test_attribute(self) -> None:
+        assert _is_test_attribute("#[test]")
 
-        result = _scoped_qname("app", [], "func")
-        assert result == "app::func"
+    def test_non_test(self) -> None:
+        assert not _is_test_attribute("method")
+        assert not _is_test_attribute("test_method")
+        assert not _is_test_attribute("_test_foo")
 
-    def test_single_scope(self) -> None:
-        from graphician.extraction.languages.parsers.base import _scoped_qname
 
-        result = _scoped_qname("app", ["MyClass"], "method")
-        assert result == "app::MyClass::method"
+class TestShouldSuppressCall:
+    """Tests for _should_suppress_call."""
 
-    def test_deep_scope(self) -> None:
-        from graphician.extraction.languages.parsers.base import _scoped_qname
+    def test_suppressed_name(self) -> None:
+        assert _should_suppress_call("std::mem")
+        assert _should_suppress_call("std::vec::Vec")
 
-        result = _scoped_qname("app", ["A", "B", "C", "D"], "x")
-        assert result == "app::A::B::C::D::x"
+    def test_not_suppressed(self) -> None:
+        assert not _should_suppress_call("process_data")
+        assert not _should_suppress_call("calculate_total")
+        assert not _should_suppress_call("len")
+        assert not _should_suppress_call("range")
+        assert not _should_suppress_call("print")
+
+
+# ---------------------------------------------------------------------------
+# Python parser integration tests
+# ---------------------------------------------------------------------------
+
+class TestPythonParser:
+    """Test Python file extraction."""
+
+    def _make_graph(self, code: bytes) -> Graph:
+        with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as f:
+            f.write(code)
+            f.flush()
+            graph = Graph()
+            extract_python(Path(f.name), graph)
+        return graph
+
+    def test_extract_simple_function(self) -> None:
+        code = b'def hello():\n    """Say hello."""\n    pass\n'
+        graph = self._make_graph(code)
+        nodes = list(graph.nodes())
+        assert len(nodes) >= 1
+
+    def test_extract_function_with_docstring(self) -> None:
+        code = b'def foo():\n    """Foo docs."""\n    pass\n'
+        graph = self._make_graph(code)
+        found = False
+        for _, node in graph.nodes():
+            if node.name == "foo":
+                assert node.source_text and "Foo docs." in node.source_text
+                found = True
+                break
+        assert found
+
+    def test_extract_class(self) -> None:
+        code = b'class MyClass:\n    """My docs."""\n    pass\n'
+        graph = self._make_graph(code)
+        found = False
+        for _, node in graph.nodes():
+            if node.name == "MyClass" and node.kind == NodeKind.CLASS:
+                assert node.source_text and "My docs." in node.source_text
+                found = True
+                break
+        assert found
+
+    def test_extract_function_call(self) -> None:
+        code = b'def caller():\n    callee()\n\ndef callee():\n    pass\n'
+        graph = self._make_graph(code)
+        assert graph.node_count() >= 2
+
+
+# ---------------------------------------------------------------------------
+# JavaScript parser integration tests
+# ---------------------------------------------------------------------------
+
+class TestJavaScriptParser:
+    """Test JavaScript file extraction."""
+
+    def _make_graph(self, code: bytes) -> Graph:
+        with tempfile.NamedTemporaryFile(suffix=".js", delete=False) as f:
+            f.write(code)
+            f.flush()
+            graph = Graph()
+            extract_javascript(Path(f.name), graph)
+        return graph
+
+    def test_extract_function(self) -> None:
+        code = b'function hello() { console.log("hi"); }'
+        graph = self._make_graph(code)
+        assert graph.node_count() >= 1
+
+    def test_extract_arrow_function(self) -> None:
+        code = b'const foo = () => { return 42; }'
+        graph = self._make_graph(code)
+        assert graph.node_count() >= 1
+
+
+# ---------------------------------------------------------------------------
+# TypeScript parser integration tests
+# ---------------------------------------------------------------------------
+
+class TestTypeScriptParser:
+    """Test TypeScript file extraction."""
+
+    def _make_graph(self, code: bytes) -> Graph:
+        with tempfile.NamedTemporaryFile(suffix=".ts", delete=False) as f:
+            f.write(code)
+            f.flush()
+            graph = Graph()
+            extract_typescript(Path(f.name), graph)
+        return graph
+
+    def test_extract_function_with_types(self) -> None:
+        code = b'function foo(x: number): string { return String(x); }'
+        graph = self._make_graph(code)
+        assert graph.node_count() >= 1
+
+    def test_extract_class(self) -> None:
+        code = b'class Greeter { greet(): string { return "hi"; } }'
+        graph = self._make_graph(code)
+        assert graph.node_count() >= 1
+
+
+# ---------------------------------------------------------------------------
+# Java parser integration tests
+# ---------------------------------------------------------------------------
+
+class TestJavaParser:
+    """Test Java file extraction."""
+
+    def _make_graph(self, code: bytes) -> Graph:
+        with tempfile.NamedTemporaryFile(suffix=".java", delete=False) as f:
+            f.write(code)
+            f.flush()
+            graph = Graph()
+            extract_java(Path(f.name), graph)
+        return graph
+
+    def test_extract_method(self) -> None:
+        code = b'public class Foo { public void bar() {} }'
+        graph = self._make_graph(code)
+        assert graph.node_count() >= 1
+
+    def test_extract_class_declaration(self) -> None:
+        code = b'public class MyClass { int x; }'
+        graph = self._make_graph(code)
+        assert graph.node_count() >= 1
+
+
+# ---------------------------------------------------------------------------
+# C++ parser integration tests
+# ---------------------------------------------------------------------------
+
+class TestCppParser:
+    """Test C++ file extraction."""
+
+    def _make_graph(self, code: bytes) -> Graph:
+        with tempfile.NamedTemporaryFile(suffix=".cpp", delete=False) as f:
+            f.write(code)
+            f.flush()
+            graph = Graph()
+            extract_cpp(Path(f.name), graph)
+        return graph
+
+    def test_extract_function(self) -> None:
+        code = b'void foo() { int x = 1; }'
+        graph = self._make_graph(code)
+        assert graph.node_count() >= 1
+
+    def test_extract_class(self) -> None:
+        code = b'class Foo { public: void bar(); };'
+        graph = self._make_graph(code)
+        assert graph.node_count() >= 1

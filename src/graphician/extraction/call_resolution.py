@@ -750,12 +750,19 @@ def _resolve_call_placeholders_python(graph: Graph) -> int:
             scored.append((cand, in_calls))
 
         max_score = max((s for _, s in scored), default=0)
-        if max_score > 0:
-            winners = [c for c, s in scored if s == max_score]
-            if len(winners) == 1:
-                stale_edges.append(edge_id)
-                if (src_id.value, winners[0].value) not in existing_calls:
-                    additions.append((src_id.value, winners[0].value, "freq_prior", False))
+        # Require: (1) at least 3 incoming calls to be considered
+        # popular enough, (2) winner must have at least 2x the
+        # runner-up to avoid picking stdlib functions that barely
+        # edge out project functions with the same name.
+        if max_score >= 3:
+            runners_up = [s for _, s in scored if s < max_score]
+            runner_up_score = max(runners_up, default=0)
+            if max_score >= runner_up_score * 2:
+                winners = [c for c, s in scored if s == max_score]
+                if len(winners) == 1:
+                    stale_edges.append(edge_id)
+                    if (src_id.value, winners[0].value) not in existing_calls:
+                        additions.append((src_id.value, winners[0].value, "freq_prior", False))
 
     # Apply additions
     count = len(additions)

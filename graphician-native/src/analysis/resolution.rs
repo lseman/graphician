@@ -399,21 +399,46 @@ pub fn plan_call_resolution(
                 stale.push(*edge_id);
                 continue;
             }
-            let max_score = candidates
+            let scored: Vec<_> = candidates
                 .iter()
-                .map(|candidate| incoming_call_count.get(candidate).copied().unwrap_or(0))
+                .copied()
+                .map(|c| {
+                    (
+                        c,
+                        incoming_call_count.get(&c).copied().unwrap_or(0),
+                    )
+                })
+                .collect();
+            let max_score = scored
+                .iter()
+                .map(|(_, s)| *s)
                 .max()
                 .unwrap_or(0);
-            if max_score > 0 {
-                let winners: Vec<_> = candidates
+            // Require: (1) at least 3 incoming calls to be considered
+            // popular enough, (2) winner must have at least 2x the
+            // runner-up to avoid picking stdlib functions that barely
+            // edge out project functions with the same name.
+            if max_score >= 3 {
+                let runners_up: Vec<_> = scored
                     .iter()
                     .copied()
-                    .filter(|candidate| {
-                        incoming_call_count.get(candidate).copied().unwrap_or(0) == max_score
-                    })
+                    .filter(|(_, s)| *s < max_score)
+                    .map(|(c, _)| c)
                     .collect();
-                if let [winner] = winners.as_slice() {
-                    selected = Some((*winner, "freq_prior", false));
+                let runner_up_score = runners_up
+                    .iter()
+                    .find_map(|c| incoming_call_count.get(c).copied())
+                    .unwrap_or(0);
+                if max_score >= runner_up_score * 2 {
+                    let winners: Vec<_> = scored
+                        .iter()
+                        .copied()
+                        .filter(|(_, s)| *s == max_score)
+                        .map(|(c, _)| c)
+                        .collect();
+                    if let [winner] = winners.as_slice() {
+                        selected = Some((*winner, "freq_prior", false));
+                    }
                 }
             }
         }

@@ -1,4 +1,5 @@
-"""Call-placeholder resolution: a 6-tier name-resolution heuristic engine.
+"""Call-placeholder resolution: a 7-tier name-resolution heuristic engine
+followed by cross-language resolution.
 
 Turns ``call::name`` placeholder edges (emitted by AST extractors when a call
 target can't be resolved locally) into real ``Calls`` edges pointing at a
@@ -23,9 +24,11 @@ Resolution tiers (best first):
        same directory as the caller.
     7. **Frequency prior** — last resort: prefer the candidate that already
        has the most resolved ``Calls`` in-edges.
+    8. **Cross-language** — when all heuristic tiers fail, look up FFI
+       boundaries (PyO3, pybind11, ctypes, ESM) to resolve calls across
+       language boundaries.
 """
 
-from __future__ import annotations
 
 import logging
 import re
@@ -787,3 +790,4 @@ def _resolve_call_placeholders_python(graph: Graph) -> int:
             graph.remove_node(nid)
 
     return count
+

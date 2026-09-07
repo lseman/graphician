@@ -1520,6 +1520,9 @@ fn graphician_native(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(community_detection_louvain, m)?)?;
     m.add_function(wrap_pyfunction!(community_detection_leiden, m)?)?;
     m.add_function(wrap_pyfunction!(community_detection_infomap, m)?)?;
+    m.add_function(wrap_pyfunction!(analysis::core::community_detection_louvain_from_native, m)?)?;
+    m.add_function(wrap_pyfunction!(analysis::core::community_detection_leiden_from_native, m)?)?;
+    m.add_function(wrap_pyfunction!(analysis::core::community_detection_infomap_from_native, m)?)?;
     m.add_function(wrap_pyfunction!(analysis::dedup::dedup_candidate_pairs, m)?)?;
     m.add_function(wrap_pyfunction!(analysis::search::fuzzy_score_matrix, m)?)?;
     m.add_function(wrap_pyfunction!(

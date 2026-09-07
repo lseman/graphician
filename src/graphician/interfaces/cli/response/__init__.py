@@ -17,7 +17,11 @@ from collections import deque
 from pathlib import Path
 from typing import Any, ClassVar
 
-from ....analysis.communities import detect_communities, knowledge_gaps
+from ....analysis.communities import (
+    detect_communities,
+    knowledge_gaps,
+)
+from ....analysis.control_flow import analyze_all_functions, analyze_function_flow
 from ....analysis.structure import find_dead_code
 from ....core.edge import EdgeKind
 from ....core.graph import Graph
@@ -398,7 +402,9 @@ def _dispatch(
         "motifs": lambda: _compact_for_detail(_motifs(graph, params), detail),
         "dedup": lambda: _compact_for_detail(_dedup(graph), detail),
         "patterns": lambda: _compact_for_detail(_patterns(graph), detail),
-        "wiki": lambda: _compact_for_detail(_wiki(graph, params), detail),
+        "control_flow": lambda: _compact_for_detail(
+            handle_control_flow(graph, params), detail
+        ),
         "suggested_questions": lambda: _compact_for_detail(
             suggested_questions_json(
                 detect_changes_json(graph, base_fn(), 2),
@@ -482,6 +488,7 @@ def _dispatch(
             )),
             detail,
         ),
+        "wiki": lambda: _wiki(graph, params),
     }
 
     handler = handlers.get(operation)
@@ -702,6 +709,22 @@ def _wiki(graph: Graph, params: dict[str, Any]) -> dict[str, Any]:
     result = _generate_wiki(graph, output, bool(params.get("force", False)))
     return {"operation": "wiki", "output_dir": output, **result}
 
+def handle_control_flow(
+    graph: Graph,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    """Handle control flow analysis operation."""
+    if "target" in params:
+        # Analyze a single function
+        target = _required_str(params, "target")
+        node_id = _resolve_node(graph, target)
+        if node_id is None:
+            return {"error": f"Node not found: {target}"}
+        return analyze_function_flow(graph, node_id)
+    else:
+        # Analyze all functions
+        limit = _limit_param(params, 100)
+        return analyze_all_functions(graph, limit)
 
 def _status(graph: Graph) -> dict[str, Any]:
     """Status response with graph stats."""

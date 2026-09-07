@@ -56,14 +56,14 @@ impl NativeGraph {
             };
             adjacency[source_index].push(NativeEdge {
                 target: target_index,
-                weight: centrality_edge_weight(&kind) * confidence_weight,
+                weight: edge_kind_weight(&kind) * confidence_weight,
                 kind: kind.clone(),
                 confidence: confidence_weight,
                 ambiguous,
             });
             reverse_adjacency[target_index].push(NativeEdge {
                 target: source_index,
-                weight: centrality_edge_weight(&kind) * confidence_weight,
+                weight: edge_kind_weight(&kind) * confidence_weight,
                 kind,
                 confidence: confidence_weight,
                 ambiguous,
@@ -198,7 +198,8 @@ impl NativeGraph {
     }
 }
 
-fn centrality_edge_weight(kind: &str) -> f32 {
+#[inline]
+pub fn edge_kind_weight(kind: &str) -> f32 {
     match kind {
         "defines" | "Defines" => 0.7,
         "calls" | "Calls" => 1.0,

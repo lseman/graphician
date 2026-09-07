@@ -49,6 +49,9 @@ if _lib_path is not None:
     community_detection_louvain = _mod.community_detection_louvain
     community_detection_leiden = _mod.community_detection_leiden
     community_detection_infomap = _mod.community_detection_infomap
+    community_detection_louvain_from_native = getattr(_mod, "community_detection_louvain_from_native", None)
+    community_detection_leiden_from_native = getattr(_mod, "community_detection_leiden_from_native", None)
+    community_detection_infomap_from_native = getattr(_mod, "community_detection_infomap_from_native", None)
     dedup_candidate_pairs = _mod.dedup_candidate_pairs
     fuzzy_score_matrix = _mod.fuzzy_score_matrix
     plan_type_resolution = getattr(_mod, "plan_type_resolution", None)
@@ -95,8 +98,11 @@ __all__ = [
     "NativeGraph",
     "available",
     "community_detection_infomap",
+    "community_detection_infomap_from_native",
     "community_detection_leiden",
+    "community_detection_leiden_from_native",
     "community_detection_louvain",
+    "community_detection_louvain_from_native",
     "dedup_candidate_pairs",
     "extract_cpp_file",
     "extract_data_flow",

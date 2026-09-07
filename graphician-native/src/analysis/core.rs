@@ -162,6 +162,69 @@ impl WorkingGraph {
             total_weight,
         })
     }
+
+    /// Build a WorkingGraph directly from a NativeGraph, avoiding string conversion.
+    pub fn from_native_graph(
+        graph: &crate::graph::NativeGraph,
+        _ambiguous_weight: f32,
+    ) -> Self {
+        let n = graph.node_ids.len();
+        if n == 0 {
+            return Self {
+                members: vec![],
+                adj: vec![],
+                self_loop: vec![],
+                degree: vec![],
+                total_weight: 0.0,
+            };
+        }
+
+        // Build members from node_ids (convert u64 to String for compatibility)
+        let members: Vec<Vec<String>> = graph
+            .node_ids
+            .iter()
+            .map(|&id| vec![id.to_string()])
+            .collect();
+
+        // Build adjacency with pre-computed weights from NativeGraph
+        let adj: Vec<Vec<(usize, f32)>> = graph
+            .adjacency
+            .iter()
+            .map(|edges| {
+                edges
+                    .iter()
+                    .map(|e| (e.target, e.weight))
+                    .collect()
+            })
+            .collect();
+
+        // Compute self-loop weights: sum of edges where target == source
+        let self_loop: Vec<f32> = graph
+            .adjacency
+            .iter()
+            .enumerate()
+            .map(|(u, edges)| {
+                edges
+                    .iter()
+                    .filter(|e| e.target == u)
+                    .map(|e| e.weight * 0.5)
+                    .sum()
+            })
+            .collect();
+
+        let degree: Vec<f32> = (0..n)
+            .map(|u| adj[u].iter().map(|(_, w)| *w).sum::<f32>() + 2.0 * self_loop[u])
+            .collect();
+        let total_weight = degree.iter().sum::<f32>() / 2.0;
+
+        Self {
+            members,
+            adj,
+            self_loop,
+            degree,
+            total_weight,
+        }
+    }
 }
 
 /// Densify labels: remap to contiguous [0, n) range.
@@ -1218,12 +1281,334 @@ pub fn community_detection_infomap(
     Ok(dict.into())
 }
 
+// ============================================================
+// Community detection from NativeGraph (no string conversion)
+// ============================================================
+
+/// Run multi-level Louvain from a NativeGraph — zero string conversion overhead.
+#[pyfunction]
+pub fn community_detection_louvain_from_native(
+    _py: Python,
+    graph: &crate::graph::NativeGraph,
+    options: Option<&CommunityOptions>,
+) -> PyResult<HashMap<u64, usize>> {
+    let options = options.unwrap_or(&CommunityOptions {
+        resolution: 1.0,
+        max_passes: 50,
+        max_levels: 10,
+        well_connectedness: 1.0,
+        min_modularity_gain: 1e-7,
+    });
+
+    let mut working = WorkingGraph::from_native_graph(graph, 0.15);
+
+    if working.total_weight <= 0.0 {
+        let mut result = HashMap::with_capacity(working.len());
+        for (i, node_id) in graph.node_ids.iter().enumerate() {
+            result.insert(*node_id, i);
+        }
+        return Ok(result);
+    }
+
+    let mut current: HashMap<String, usize> = working
+        .members
+        .iter()
+        .flatten()
+        .enumerate()
+        .map(|(i, id)| (id.clone(), i))
+        .collect();
+
+    for _level in 0..options.max_levels {
+        let partition = local_move(&working, options);
+        let distinct: HashSet<usize> = partition.iter().copied().collect();
+        let moved = distinct.len() < working.len();
+
+        let aggregation_partition = densify_labels(&partition);
+
+        for (super_idx, members) in working.members.iter().enumerate() {
+            for id in members {
+                current.insert(id.clone(), aggregation_partition[super_idx]);
+            }
+        }
+
+        if !moved {
+            break;
+        }
+
+        working = aggregate(&working, &aggregation_partition);
+        if working.len() <= 1 {
+            break;
+        }
+    }
+
+    let final_labels = relabel(current);
+
+    let mut result = HashMap::with_capacity(final_labels.len());
+    for (node_str, label) in &final_labels {
+        if let Ok(node_id) = node_str.parse::<u64>() {
+            result.insert(node_id, *label);
+        }
+    }
+    Ok(result)
+}
+
+/// Run multi-level Leiden from a NativeGraph — zero string conversion overhead.
+#[pyfunction]
+pub fn community_detection_leiden_from_native(
+    _py: Python,
+    graph: &crate::graph::NativeGraph,
+    options: Option<&CommunityOptions>,
+) -> PyResult<HashMap<u64, usize>> {
+    let options = options.unwrap_or(&CommunityOptions {
+        resolution: 1.0,
+        max_passes: 50,
+        max_levels: 10,
+        well_connectedness: 1.0,
+        min_modularity_gain: 1e-7,
+    });
+
+    let mut working = WorkingGraph::from_native_graph(graph, 0.15);
+
+    if working.total_weight <= 0.0 {
+        let mut result = HashMap::with_capacity(working.len());
+        for (i, node_id) in graph.node_ids.iter().enumerate() {
+            result.insert(*node_id, i);
+        }
+        return Ok(result);
+    }
+
+    let original_working = working.clone();
+    let two_m = 2.0 * original_working.total_weight;
+
+    let mut current: HashMap<String, usize> = working
+        .members
+        .iter()
+        .flatten()
+        .enumerate()
+        .map(|(i, id)| (id.clone(), i))
+        .collect();
+
+    let mut best_mapping = current.clone();
+    let original_labels: Vec<usize> = original_working
+        .members
+        .iter()
+        .flatten()
+        .map(|id| *current.get(id).unwrap_or(&0))
+        .collect();
+    let mut best_lmdl = compute_lmdl(&original_working, &original_labels, two_m);
+
+    for _level in 0..options.max_levels {
+        if working.total_weight <= 0.0 || working.len() <= 1 {
+            break;
+        }
+
+        let two_m_level = 2.0 * working.total_weight;
+
+        let mut labels = random_walk_init(&working);
+
+        let mut prev_pass_lmdl = f32::INFINITY;
+        for _pass in 0..options.max_passes {
+            let (new_labels, lmdl) =
+                infomap_local_move(&working, &labels, two_m_level, options.max_passes);
+            labels = new_labels;
+
+            let improved = (prev_pass_lmdl - lmdl).abs() > 1e-8;
+            prev_pass_lmdl = lmdl;
+
+            if !improved && _pass >= 2 {
+                break;
+            }
+        }
+
+        let aggregation_partition: Vec<usize> = if options.well_connectedness > 0.0 {
+            infomap_refinement(&working, &labels, options)
+        } else {
+            densify_labels(&labels)
+        };
+
+        let moved = aggregation_partition
+            .iter()
+            .enumerate()
+            .any(|(i, &l)| l != labels[i]);
+
+        let mut candidate_mapping = current.clone();
+        for label in candidate_mapping.values_mut() {
+            *label = aggregation_partition[*label];
+        }
+
+        let candidate_labels: Vec<usize> = original_working
+            .members
+            .iter()
+            .flatten()
+            .map(|id| *candidate_mapping.get(id).unwrap_or(&0))
+            .collect();
+        let candidate_lmdl = compute_lmdl(&original_working, &candidate_labels, two_m);
+
+        if candidate_lmdl + 1e-6 < best_lmdl {
+            best_lmdl = candidate_lmdl;
+            best_mapping = candidate_mapping.clone();
+            current = candidate_mapping;
+            if !moved {
+                break;
+            }
+        } else {
+            break;
+        }
+
+        if !moved {
+            break;
+        }
+
+        working = aggregate(&working, &aggregation_partition);
+        if working.len() <= 1 {
+            break;
+        }
+    }
+
+    let final_labels = relabel(best_mapping);
+
+    let mut result = HashMap::with_capacity(final_labels.len());
+    for (node_str, label) in &final_labels {
+        if let Ok(node_id) = node_str.parse::<u64>() {
+            result.insert(node_id, *label);
+        }
+    }
+    Ok(result)
+}
+
+/// Run multi-level Infomap from a NativeGraph — zero string conversion overhead.
+#[pyfunction]
+pub fn community_detection_infomap_from_native(
+    _py: Python,
+    graph: &crate::graph::NativeGraph,
+    options: Option<&CommunityOptions>,
+) -> PyResult<HashMap<u64, usize>> {
+    let options = options.unwrap_or(&CommunityOptions {
+        resolution: 1.0,
+        max_passes: 50,
+        max_levels: 10,
+        well_connectedness: 1.0,
+        min_modularity_gain: 1e-7,
+    });
+
+    let mut working = WorkingGraph::from_native_graph(graph, 0.15);
+
+    if working.total_weight <= 0.0 {
+        let mut result = HashMap::with_capacity(working.len());
+        for (i, node_id) in graph.node_ids.iter().enumerate() {
+            result.insert(*node_id, i);
+        }
+        return Ok(result);
+    }
+
+    let original_working = working.clone();
+    let two_m = 2.0 * original_working.total_weight;
+
+    let mut current: HashMap<String, usize> = working
+        .members
+        .iter()
+        .flatten()
+        .enumerate()
+        .map(|(i, id)| (id.clone(), i))
+        .collect();
+
+    let mut best_mapping = current.clone();
+    let original_labels: Vec<usize> = original_working
+        .members
+        .iter()
+        .flatten()
+        .map(|id| *current.get(id).unwrap_or(&0))
+        .collect();
+    let mut best_lmdl = compute_lmdl(&original_working, &original_labels, two_m);
+
+    for _level in 0..options.max_levels {
+        if working.total_weight <= 0.0 || working.len() <= 1 {
+            break;
+        }
+
+        let two_m_level = 2.0 * working.total_weight;
+
+        let mut labels = random_walk_init(&working);
+
+        let mut prev_pass_lmdl = f32::INFINITY;
+        for _pass in 0..options.max_passes {
+            let (new_labels, lmdl) =
+                infomap_local_move(&working, &labels, two_m_level, options.max_passes);
+            labels = new_labels;
+
+            let improved = (prev_pass_lmdl - lmdl).abs() > 1e-8;
+            prev_pass_lmdl = lmdl;
+
+            if !improved && _pass >= 2 {
+                break;
+            }
+        }
+
+        let aggregation_partition: Vec<usize> = if options.well_connectedness > 0.0 {
+            infomap_refinement(&working, &labels, options)
+        } else {
+            densify_labels(&labels)
+        };
+
+        let moved = aggregation_partition
+            .iter()
+            .enumerate()
+            .any(|(i, &l)| l != labels[i]);
+
+        let mut candidate_mapping = current.clone();
+        for label in candidate_mapping.values_mut() {
+            *label = aggregation_partition[*label];
+        }
+
+        let candidate_labels: Vec<usize> = original_working
+            .members
+            .iter()
+            .flatten()
+            .map(|id| *candidate_mapping.get(id).unwrap_or(&0))
+            .collect();
+        let candidate_lmdl = compute_lmdl(&original_working, &candidate_labels, two_m);
+
+        if candidate_lmdl + 1e-6 < best_lmdl {
+            best_lmdl = candidate_lmdl;
+            best_mapping = candidate_mapping.clone();
+            current = candidate_mapping;
+            if !moved {
+                break;
+            }
+        } else {
+            break;
+        }
+
+        if !moved {
+            break;
+        }
+
+        working = aggregate(&working, &aggregation_partition);
+        if working.len() <= 1 {
+            break;
+        }
+    }
+
+    let final_labels = relabel(best_mapping);
+
+    let mut result = HashMap::with_capacity(final_labels.len());
+    for (node_str, label) in &final_labels {
+        if let Ok(node_id) = node_str.parse::<u64>() {
+            result.insert(node_id, *label);
+        }
+    }
+    Ok(result)
+}
+
 #[pymodule]
 fn analysis(_py: Python, m: Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<CommunityOptions>()?;
     m.add_function(wrap_pyfunction!(community_detection_louvain, &m)?)?;
+    m.add_function(wrap_pyfunction!(community_detection_louvain_from_native, &m)?)?;
     m.add_function(wrap_pyfunction!(community_detection_leiden, &m)?)?;
+    m.add_function(wrap_pyfunction!(community_detection_leiden_from_native, &m)?)?;
     m.add_function(wrap_pyfunction!(community_detection_infomap, &m)?)?;
+    m.add_function(wrap_pyfunction!(community_detection_infomap_from_native, &m)?)?;
     m.add_function(wrap_pyfunction!(densify, &m)?)?;
     m.add(
         "__doc__",

@@ -18,10 +18,15 @@ from .communities import (
 )
 from .communities.quality import CommunityQuality, community_cohesion, community_quality
 from .context_pack import build_context_pack
+from .control_flow import (
+    analyze_all_functions,
+    analyze_function_flow,
+    build_cfg,
+    compute_def_use_chains,
+)
 from .coverage import graph_coverage
 from .dedup import DedupOptions, DedupResult, deduplicate_nodes
 from .flows import FlowOptions, compute_flows
-from .impact import ImpactHit, ImpactQuery, compute_impact, find_impact
 from .motifs import (
     Motif,
     MotifBuilder,
@@ -116,8 +121,11 @@ __all__ = [
     "WeightedPath",
     "_refactor_find_dead_code",
     "_refactor_rename_preview",
+    "analyze_all_functions",
+    "analyze_function_flow",
     "approx_betweenness",
     "bridge_scores",
+    "build_cfg",
     # Context / Semantics
     "build_context_pack",
     "call_resolution_stats",
@@ -127,6 +135,7 @@ __all__ = [
     "community_cohesion",
     "community_quality",
     "compute_centrality",
+    "compute_def_use_chains",
     # Flows
     "compute_flows",
     # Impact

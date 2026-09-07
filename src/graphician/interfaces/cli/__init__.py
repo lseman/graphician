@@ -11,6 +11,7 @@ Subcommands mirror the Rust version:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -41,7 +42,7 @@ from ...core.graph import Graph
 from ...extraction.compiler import apply_compiler_evidence, load_compiler_evidence
 from ...extraction.jedi import enrich_jedi_calls
 from ...extraction.languages import LanguageRegistry
-from ...extraction.pipeline import ExtractionPipeline
+from ...extraction.pipeline import DOCUMENT_SUFFIXES, MANIFEST_NAMES, ExtractionPipeline
 from ...extraction.rust_analyzer import RustAnalyzerOptions, enrich_with_rust_analyzer
 from ...extraction.spring_di import resolve_spring_injections
 from ...persistence.embeddings import build_external_embeddings, build_local_embeddings
@@ -397,12 +398,90 @@ def _load_store(args: argparse.Namespace) -> GraphStore:
 
 
 def cmd_build(args: argparse.Namespace) -> None:
-    """Build a graph from a project root."""
+    """Build a graph from a project root — smart, auto-incremental."""
     root = Path(args.path).resolve()
     if not root.exists():
         print(f"Error: {root} does not exist", file=sys.stderr)
         sys.exit(1)
 
+    store = _load_store(args)
+
+    # Check if a graph already exists
+    existing_status = store.status()
+    has_graph = existing_status.get("node_count", 0) > 0
+    has_file_hashes = store.get_file_hashes()
+
+    if has_graph and has_file_hashes:
+        # Compute current file hashes
+        registry = LanguageRegistry()
+        pipeline = ExtractionPipeline(registry, strict=True)
+        files = pipeline.discover_files(root)
+        current_hashes: dict[str, str] = {}
+        for f in files:
+            try:
+                content = f.read_bytes()
+                current_hashes[str(f.relative_to(root))] = hashlib.sha256(content).hexdigest()
+            except OSError:
+                pass
+
+        # Detect changes
+        changed, deleted = store.get_changed_files(current_hashes)
+
+        if not changed and not deleted:
+            print(f"Graph is up to date ({existing_status['node_count']} nodes, {existing_status['edge_count']} edges)", file=sys.stderr)
+            store.close()
+            return
+
+        # Check if we can do incremental update (no doc/manifest changes)
+        touched = [Path(p) for p in changed + deleted]
+        can_incremental = not any(
+            path.suffix.lower() in DOCUMENT_SUFFIXES
+            or path.name.lower() in MANIFEST_NAMES
+            for path in touched
+        )
+
+        if can_incremental:
+            print(f"Incremental update: {len(changed)} changed, {len(deleted)} deleted files", file=sys.stderr)
+            registry = LanguageRegistry()
+            pipeline = ExtractionPipeline(registry, strict=True)
+            existing = store.load_graph()
+            previous_revision = store.get_metadata("indexed_commit") or store.get_metadata("last_updated")
+            if previous_revision and existing_status["node_count"]:
+                store.create_snapshot(previous_revision)
+            graph = pipeline.update(root, existing, changed, deleted)
+            evidence_path = root / ".graphician" / "compiler-evidence.json"
+            if evidence_path.exists():
+                evidence = load_compiler_evidence(evidence_path)
+                report = apply_compiler_evidence(graph, evidence)
+                logger.info(
+                    "Compiler enrichment (%s): added=%d upgraded=%d unresolved=%d",
+                    evidence.provider,
+                    report.added,
+                    report.upgraded,
+                    report.unresolved,
+                )
+            commit = git_commit_hash(root)
+            if commit is not None:
+                _stamp_valid_from(graph, commit)
+            store.save_graph_incremental(graph, pipeline._file_hashes or current_hashes)
+            store.set_metadata("repository_root", str(root))
+            if commit is not None:
+                store.set_metadata("indexed_commit", commit)
+            print(f"Updated: {graph.node_count()} nodes, {graph.edge_count()} edges", file=sys.stderr)
+        else:
+            print(f"Full rebuild needed: {len(changed)} changed (includes docs/manifests)", file=sys.stderr)
+            # Fall through to full build below
+            store.close()
+            cmd_build_full(args)
+            return
+    else:
+        # No existing graph — do full build
+        cmd_build_full(args)
+        return
+
+def cmd_build_full(args: argparse.Namespace) -> None:
+    """Full graph build from a project root."""
+    root = Path(args.path).resolve()
     store = _load_store(args)
     registry = LanguageRegistry()
     pipeline = ExtractionPipeline(registry, strict=True)

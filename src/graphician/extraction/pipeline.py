@@ -868,7 +868,7 @@ class ExtractionPipeline:
     # ── Post-extraction ──────────────────────────────────────────────
 
     def _resolve_calls(self) -> None:
-        """Resolve call:: placeholders via the 6-tier resolver."""
+        """Resolve call:: placeholders via 7-tier heuristic resolver + cross-language (Tier 8)."""
         resolved = resolve_call_placeholders(self.graph)
         logger.info("Call resolution: %d resolved", resolved)
         # Tier 7: library stubs — resolve remaining call:: placeholders
@@ -880,6 +880,18 @@ class ExtractionPipeline:
                 stub_stats["resolved"],
                 stub_stats["unresolved_remaining"],
             )
+
+        # Tier 8: Cross-language call resolution
+        try:
+            cross_stats = self._enrich_cross_language()
+            if cross_stats.get("resolved", 0):
+                logger.info(
+                    "Cross-language resolution: %d resolved, %d remaining",
+                    cross_stats["resolved"],
+                    cross_stats.get("unresolved_remaining", 0),
+                )
+        except Exception:
+            logger.warning("Cross-language resolution failed", exc_info=True)
 
     def _resolve_type_placeholders(self) -> None:
         """Resolve type:: placeholders left by supertype extraction."""
@@ -916,6 +928,11 @@ class ExtractionPipeline:
                     pass
         if matches:
             logger.info("Pattern detection: %d patterns found", len(matches))
+
+    def _enrich_cross_language(self) -> dict[str, int]:
+        """Run cross-language call resolution (Tier 8)."""
+        from .cross_language import enrich_with_cross_language_data
+        return enrich_with_cross_language_data(self.graph)
 
     def _enrich_data_flow(self) -> None:
         functions = [

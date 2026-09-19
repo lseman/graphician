@@ -120,7 +120,7 @@ def fts_ranked_search(
 
         # Qualified name boost
         if dotted_query:
-            normalized_qname = _normalize_identifier(node.qualified_name.replace("::", "."))
+            normalized_qname = node.normalized_qname or _normalize_identifier(node.qualified_name.replace("::", "."))
             if normalized_query in normalized_qname:
                 hit.score *= 1.25
                 if "qualified_boost" not in hit.reasons:
@@ -128,9 +128,7 @@ def fts_ranked_search(
 
         # Identifier boost
         if query_identifiers:
-            normalized_qname = _normalize_identifier(
-                node.qualified_name.replace("::", " ")
-            )
+            normalized_qname = node.normalized_qname or _normalize_identifier(node.qualified_name.replace("::", " "))
             if any(identifier in normalized_qname for identifier in query_identifiers):
                 hit.score *= 1.30
                 if "identifier_boost" not in hit.reasons:
@@ -140,8 +138,8 @@ def fts_ranked_search(
         if symbol_query and _is_definition_like_node(node):
             leaf = query.split("::")[-1].split(".")[-1]
             leaf_norm = _normalize_identifier(leaf)
-            name_norm = _normalize_identifier(node.name)
-            qname_norm = _normalize_identifier(node.qualified_name.replace("::", "."))
+            name_norm = node.normalized_name or _normalize_identifier(node.name)
+            qname_norm = node.normalized_qname or _normalize_identifier(node.qualified_name.replace("::", "."))
             if leaf_norm == name_norm or normalized_query in qname_norm:
                 hit.score *= 1.35
                 if "definition_boost" not in hit.reasons:

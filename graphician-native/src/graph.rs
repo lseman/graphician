@@ -20,6 +20,7 @@ pub struct NativeGraph {
     pub(crate) node_index: HashMap<u64, usize>,
     pub(crate) adjacency: Vec<Vec<NativeEdge>>,
     pub(crate) reverse_adjacency: Vec<Vec<NativeEdge>>,
+    pub(crate) skipped_edges: usize,
 }
 
 #[pymethods]
@@ -36,17 +37,16 @@ impl NativeGraph {
         }
 
         let mut adjacency = vec![Vec::new(); node_ids.len()];
+        let mut skipped_edges = 0usize;
         let mut reverse_adjacency = vec![Vec::new(); node_ids.len()];
         for (source, target, kind, confidence) in edges {
-            let Some(&source_index) = node_index.get(&source) else {
-                return Err(PyValueError::new_err(format!(
-                    "edge source {source} is not present in node_ids"
-                )));
+            let source_index = match node_index.get(&source) {
+                Some(&i) => i,
+                None => { skipped_edges += 1; continue },
             };
-            let Some(&target_index) = node_index.get(&target) else {
-                return Err(PyValueError::new_err(format!(
-                    "edge target {target} is not present in node_ids"
-                )));
+            let target_index = match node_index.get(&target) {
+                Some(&i) => i,
+                None => { skipped_edges += 1; continue },
             };
             let ambiguous = confidence.eq_ignore_ascii_case("ambiguous");
             let confidence_weight = if confidence.eq_ignore_ascii_case("extracted") {
@@ -81,6 +81,7 @@ impl NativeGraph {
             node_index,
             adjacency,
             reverse_adjacency,
+            skipped_edges,
         })
     }
 
@@ -92,6 +93,10 @@ impl NativeGraph {
     #[getter]
     pub fn edge_count(&self) -> usize {
         self.adjacency.iter().map(Vec::len).sum()
+    }
+    #[getter]
+    pub fn skipped_edges(&self) -> usize {
+        self.skipped_edges
     }
 
     #[pyo3(signature = (damping=0.85, iterations=30, seeds=None))]

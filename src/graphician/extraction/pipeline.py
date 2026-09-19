@@ -81,6 +81,25 @@ DEFAULT_EXCLUDES = {
 }
 DOCUMENT_SUFFIXES = {".md", ".markdown", ".html", ".htm", ".svg"}
 MANIFEST_NAMES = {"package.json", "pyproject.toml", "cargo.toml", "setup.py", "setup.cfg"}
+# Language interop families for cross-language phantom edge filtering.
+# Families group by real interop (JS/TS share a module graph; C/C++ share headers;
+# JVM langs share bytecode), so a legitimate TS→JS import survives, while a
+# Python `import time` binding to a `time.ts` is dropped.
+_LANG_FAMILY: dict[str, str] = {
+    ".py": "py", ".pyi": "py",
+    ".js": "js", ".mjs": "js", ".cjs": "js", ".jsx": "js",
+    ".ts": "js", ".tsx": "js", ".mts": "js", ".cts": "js",
+    ".go": "go", ".rs": "rs",
+    ".java": "jvm", ".kt": "jvm", ".scala": "jvm", ".groovy": "jvm",
+    ".c": "c", ".h": "c", ".cc": "c", ".cpp": "c", ".hpp": "c",
+    ".cxx": "c", ".hh": "c", ".hxx": "c",
+    ".cs": "cs", ".swift": "swift", ".lua": "lua", ".rb": "rb", ".php": "php",
+}
+# Relations that need phantom filtering: unresolved targets can bind to same-
+# named nodes in other languages, creating false connectivity.
+_PHANTOM_RELATIONS = frozenset({"calls", "imports", "imports_from", "mentions"})
+# Generic relations that should lose to specific ones (e.g. calls > references).
+_GENERIC_RELATIONS = frozenset({"mentions", "describes"})
 
 
 def _dedicated_extractors() -> dict[Language, Any]:
@@ -259,6 +278,10 @@ class ExtractionPipeline:
         self._enrich_data_flow()
         resolve_ts_path_aliases(self.graph, root)
         resolve_mentions(self.graph)
+        # Edge quality filtering
+        self._filter_cross_language_phantoms()
+        self._dedup_generic_relations()
+        self._create_stub_nodes()
         self._build_flows()
 
         logger.info(
@@ -977,6 +1000,99 @@ class ExtractionPipeline:
                 continue
             seen.add(pair)
             self.graph.add_edge(target_id, source_id, Edge.extracted(EdgeKind.TESTED_BY))
+
+    # ── Edge quality filtering ──────────────────────────────────────
+
+    def _filter_cross_language_phantoms(self) -> None:
+        """Remove cross-language phantom edges.
+
+        Unresolved `call::name` targets can accidentally bind to same-named
+        nodes in other languages (e.g. Python `import time` → `time.ts`).
+        We drop `calls`, `imports`, and `mentions` edges when both
+        endpoints are from different language families.
+
+        Edges survive when both endpoints are in the same family (JS/TS
+        imports, C/C++ header calls), are between a code node and a
+        non-code node (e.g. file → document), or when one endpoint has no
+        language (documents, concepts).
+        """
+        def _family(nid: NodeId) -> str | None:
+            node = self.graph.node(nid)
+            if node is None:
+                return None
+            src = node.source_uri or ""
+            ext = src.rsplit(".", 1)[-1] if "." in src else ""
+            return _LANG_FAMILY.get(ext)
+
+        for _, src_id, dst_id, edge in list(self.graph.edges()):
+            if edge.kind.value not in _PHANTOM_RELATIONS:
+                continue
+            fam_src = _family(src_id)
+            fam_dst = _family(dst_id)
+            if fam_src is None or fam_dst is None:
+                continue
+            if fam_src == fam_dst:
+                continue
+            self.graph.remove_edge_by_kind(src_id, dst_id, edge.kind)
+        kept = sum(
+            1
+            for _, _, _, e in self.graph.edges()
+            if e.kind.value in _PHANTOM_RELATIONS
+        )
+        logger.info(
+            "Cross-language phantom filter: %d edges remain after filtering",
+            kept,
+        )
+
+    def _dedup_generic_relations(self) -> None:
+        """Deduplicate edges where generic relations lose to specific ones.
+
+        When the same node pair has both a specific relation (e.g. `calls`)
+        and a generic one (e.g. `mentions`, `describes`), keep only the
+        specific relation and drop the generic one.
+        """
+        pair_edges: dict[tuple[NodeId, NodeId], list[Edge]] = {}
+        for _, src_id, dst_id, edge in self.graph.edges():
+            key = (src_id, dst_id)
+            pair_edges.setdefault(key, []).append(edge)
+
+        for (src_id, dst_id), edges in pair_edges.items():
+            has_specific = any(
+                e.kind.value not in _GENERIC_RELATIONS for e in edges
+            )
+            if has_specific:
+                for edge in edges:
+                    if edge.kind.value in _GENERIC_RELATIONS:
+                        self.graph.remove_edge_by_kind(src_id, dst_id, edge.kind)
+
+    def _create_stub_nodes(self) -> int:
+        """Create stub nodes for edges that point to non-existent targets.
+
+        Import and call edges may reference symbols not extracted from the
+        project (stdlib, third-party, external). Instead of dropping these
+        edges, we mint lightweight stub nodes so connectivity is preserved.
+        """
+        stub_count = 0
+
+        for _, src_id, dst_id, edge in list(self.graph.edges()):
+            dst = self.graph.node(dst_id)
+            if dst is not None:
+                continue
+            # Dangling edge: remove it and create a stub node instead
+            stub_name = f"{edge.kind.value}::{dst_id}"
+            stub = Node.new(
+                NodeKind.MODULE if edge.kind == EdgeKind.IMPORTS
+                else NodeKind.FUNCTION,
+                stub_name,
+            ).with_property("_stub", True)
+            stub_id = self.graph.add_node(stub)
+            self.graph.remove_edge_by_kind(src_id, dst_id, edge.kind)
+            self.graph.add_edge(src_id, stub_id, edge.kind)
+            stub_count += 1
+
+        if stub_count:
+            logger.info("Created %d stub nodes for dangling import/call edges", stub_count)
+        return stub_count
 
     def _build_flows(self) -> None:
         """Build execution flows via the dedicated flow detection engine."""

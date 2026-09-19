@@ -59,6 +59,7 @@ class Node:
     properties: dict[str, Any] = field(default_factory=dict)
     valid_from: str | None = None
     valid_to: str | None = None
+    normalized_name: str | None = None
     source_text: str | None = None
 
     @classmethod
@@ -90,6 +91,11 @@ class Node:
         self.source_text = encoded.decode("utf-8", errors="ignore")
         return self
 
+    def with_normalized(self, normalized_name: str, normalized_qname: str) -> Node:
+        """Attach pre-computed normalized forms for search."""
+        self.normalized_name = normalized_name
+        self.normalized_qname = normalized_qname
+        return self
     def with_property(self, key: str, value: Any) -> Node:
         """Attach a property."""
         self.properties[key] = value

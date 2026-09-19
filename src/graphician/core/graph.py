@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from .edge import Edge, EdgeKind
 from .id import EdgeId, NodeId
 from .node import Node
+from .normalize import _normalize_identifier
 
 
 class Graph:
@@ -49,16 +50,50 @@ class Graph:
     # ── Node operations ──────────────────────────────────────────────
 
     def add_node(self, node: Node) -> NodeId:
-        """Add a node. Duplicate qualified_name updates in place."""
+        """Add a node. Duplicate qualified_name merges instead of overwriting.
+
+        Merging strategy: keep AST-sourced attributes (source_uri, line_start,
+        line_end, source_text) from the existing node since the AST pass runs
+        first and has the most precise source information. Properties from the
+        new node fill gaps but never overwrite existing properties. This
+        prevents data-flow or call-resolution passes from losing the AST
+        source_location of a symbol.
+        """
         qn = node.qualified_name
         if qn in self._by_qname:
             idx = self._by_qname[qn]
-            self._nodes[idx] = node
+            existing = self._nodes[idx]
+            # Merge: keep AST source info from existing, fill gaps from new
+            if existing.source_uri is None:
+                existing.source_uri = node.source_uri
+            if existing.line_start is None:
+                existing.line_start = node.line_start
+            if existing.line_end is None:
+                existing.line_end = node.line_end
+            if existing.source_text is None:
+                existing.source_text = node.source_text
+            # Merge properties: new fills gaps, doesn't overwrite
+            if node.properties:
+                for k, v in node.properties.items():
+                    if k not in existing.properties:
+                        existing.properties[k] = v
+            # Update normalized forms only if not already set
+            if existing.normalized_name is None and node.normalized_name is not None:
+                existing.normalized_name = node.normalized_name
+            if existing.normalized_qname is None and node.normalized_qname is not None:
+                existing.normalized_qname = node.normalized_qname
             return NodeId(idx)
         idx = self._next_node_id
         self._next_node_id += 1
         self._nodes[idx] = node
         self._by_qname[qn] = idx
+        # Pre-compute normalized forms if not already set (search optimization)
+        if node.normalized_name is None:
+            nn = _normalize_identifier(node.name)
+            nq = _normalize_identifier(node.qualified_name)
+            if nn is not None and nq is not None:
+                node.normalized_name = nn
+                node.normalized_qname = nq
         self._invalidate_native_snapshot()
         return NodeId(idx)
 
@@ -193,8 +228,8 @@ class Graph:
     # ── Iteration ────────────────────────────────────────────────────
 
     def nodes(self) -> Iterator[tuple[NodeId, Node]]:
-        for idx, node in self._nodes.items():
-            yield NodeId(idx), node
+        for idx in sorted(self._nodes.keys()):
+            yield NodeId(idx), self._nodes[idx]
 
     def edges(self) -> Iterator[tuple[EdgeId, NodeId, NodeId, Edge]]:
         for eid, (src, dst, edge) in sorted(self._edges.items()):
@@ -289,6 +324,23 @@ class Graph:
         self._out[src] = [(d, e) for d, e in self._out[src] if e != eid]
         self._in[dst] = [(s, e) for s, e in self._in[dst] if e != eid]
         del self._edges[eid]
+
+    def remove_edge_by_kind(self, src: NodeId, dst: NodeId, kind: EdgeKind) -> None:
+        """Remove the first edge matching (src, dst, kind)."""
+        src_idx, dst_idx = src.value, dst.value
+        for d, eid in self._out.get(src_idx, []):
+            if d == dst_idx:
+                _, _, edge = self._edges[eid]
+                if edge.kind == kind:
+                    self._invalidate_native_snapshot()
+                    self._out[src_idx] = [
+                        (dd, ee) for dd, ee in self._out[src_idx] if ee != eid
+                    ]
+                    self._in[dst_idx] = [
+                        (ss, ee) for ss, ee in self._in[dst_idx] if ee != eid
+                    ]
+                    del self._edges[eid]
+                    return
 
     def _has_edge_kind(self, src: int, dst: int, kind: EdgeKind) -> bool:
         for d, eid in self._out.get(src, []):

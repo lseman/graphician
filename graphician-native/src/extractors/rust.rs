@@ -553,10 +553,6 @@ fn emit_imports_rust(
     }
 }
 
-fn extract_decorators(_node: &tree_sitter::Node, _source: &[u8]) -> Vec<String> {
-    Vec::new()
-}
-
 fn has_method_parent(node: &tree_sitter::Node) -> bool {
     // Check grandparent because impl_item -> declaration_list -> function_item
     if let Some(parent) = node.parent() {

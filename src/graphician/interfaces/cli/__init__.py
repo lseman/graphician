@@ -331,6 +331,7 @@ def main() -> None:
 
     # mcp-server
     subparsers.add_parser("mcp-server", help="Start MCP server")
+    subparsers.add_parser("worker", help="Start the persistent JSONL worker (stdin/stdout)")
 
     # wiki
     wiki_p = subparsers.add_parser("wiki", help="Generate markdown wiki from communities")
@@ -398,6 +399,7 @@ def main() -> None:
         "test-coverage": cmd_test_coverage,
         "tool": cmd_tool,
         "mcp-server": cmd_mcp_server,
+        "worker": cmd_worker,
         "report": cmd_report,
         **{name: cmd_generic_operation for name in generic_operations},
         "graph-diff": cmd_graph_diff,
@@ -1004,6 +1006,13 @@ def cmd_tool(args: argparse.Namespace) -> None:
     )
 
     print(json.dumps(result, indent=2))
+
+
+def cmd_worker(args: argparse.Namespace) -> None:
+    """Run the persistent JSONL worker (stdin/stdout)."""
+    from ..transport import jsonl_worker
+
+    jsonl_worker.serve()
 
 
 def cmd_generic_operation(args: argparse.Namespace) -> None:

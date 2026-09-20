@@ -82,8 +82,19 @@ def cmd_install(db_path: str, repo: str, force: bool = False,
 
         script = (
             f'#!/bin/sh\n'
-            f'"{sys.executable}" -m graphician --db "{db_path_obj}" update '
-            f'"{repo_path}" >/dev/null 2>&1 || true\n'
+            f'OUT_DIR="{repo_path}/.graphician"\n'
+            f'mkdir -p "$OUT_DIR"\n'
+            # Get changed files from git
+            f'git diff --name-only HEAD 2>/dev/null | grep -E '"'"r'\.(py|rs|ts|tsx|js|jsx|java|c|cpp|h|hpp|hh|hxx|go|rb|kt|swift|scala|cs|php|md|html|svg|toml|json|yaml|yml|xml|cfg|ini|conf)$'"'"' | while read -r f; do\n'
+            f'    echo "$PWD/$f" >> "$OUT_DIR/.pending_changes"\n'
+            f'done\n'
+            # Also queue post-merge/post-checkout (all tracked files)
+            f'if [ "$1" = "post-merge" ] || [ "$1" = "post-checkout" ]; then\n'
+            f'    git diff --name-only --cached 2>/dev/null | while read -r f; do\n'
+            f'        echo "$PWD/$f" >> "$OUT_DIR/.pending_changes"\n'
+            f'    done\n'
+            f'fi\n'
+            f'"{sys.executable}" -m graphician --db "{db_path_obj}" rebuild "{repo_path}" >/dev/null 2>&1 || true\n'
         )
         hook_path.write_text(script, encoding="utf-8")
         hook_path.chmod(0o755)

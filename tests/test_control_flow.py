@@ -3,10 +3,10 @@
 from graphician.analysis.control_flow import (
     analyze_all_functions,
     analyze_function_flow,
+    analyze_reachable_blocks,
     build_cfg,
     compute_def_use_chains,
     find_critical_path,
-    analyze_reachable_blocks,
 )
 from graphician.core.graph import Graph
 from graphician.core.id import NodeId

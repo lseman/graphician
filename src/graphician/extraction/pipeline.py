@@ -13,6 +13,7 @@ import fnmatch
 import hashlib
 import logging
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
@@ -41,21 +42,98 @@ extract_data_flow = _native_extract_data_flow if HAS_RUST else _python_extract_d
 logger = logging.getLogger(__name__)
 
 
-def _is_ignored(path: Path, patterns: list[str]) -> bool:
-    """Apply common gitignore-style patterns, including later negation."""
-    value = path.as_posix()
-    ignored = False
-    for raw_pattern in patterns:
-        negated = raw_pattern.startswith("!")
-        pattern = raw_pattern[1:] if negated else raw_pattern
-        pattern = pattern.lstrip("/").rstrip("/")
+_GLOB_CHARS = frozenset("*?[")
+
+
+class _IgnoreRule:
+    """A precompiled gitignore-style pattern.
+
+    Literal patterns compare strings directly; glob patterns are compiled
+    with fnmatch.translate so matching is semantically identical to the
+    old per-file fnmatch.fnmatch calls (including os.path.normcase).
+    """
+
+    __slots__ = ("full_re", "literal", "negated", "part_re", "under_re")
+
+    def __init__(
+        self,
+        negated: bool,
+        literal: str | None,
+        full_re: re.Pattern[str] | None,
+        under_re: re.Pattern[str] | None,
+        part_re: re.Pattern[str] | None,
+    ) -> None:
+        self.negated = negated
+        self.literal = literal
+        self.full_re = full_re
+        self.under_re = under_re
+        self.part_re = part_re
+
+    def matches(self, value: str, parts: tuple[str, ...]) -> bool:
+        full_re = self.full_re
+        if full_re is None:
+            literal = self.literal
+            if literal is None:
+                return False
+            if value == literal or value.startswith(literal + "/"):
+                return True
+            return any(part == literal for part in parts)
+        under_re = self.under_re
+        if under_re is not None and (full_re.match(value) or under_re.match(value)):
+            return True
+        part_re = self.part_re
+        if part_re is not None:
+            return any(part_re.match(part) for part in parts)
+        return False
+
+
+def _compile_ignore_patterns(patterns: list[str]) -> list[_IgnoreRule]:
+    """Compile raw .gitignore/.graphicianignore lines into matchers."""
+    rules: list[_IgnoreRule] = []
+    for raw in patterns:
+        negated = raw.startswith("!")
+        pattern = (raw[1:] if negated else raw).lstrip("/").rstrip("/")
         if not pattern:
             continue
-        matched = fnmatch.fnmatch(value, pattern) or fnmatch.fnmatch(value, f"{pattern}/**")
+        pattern = os.path.normcase(pattern)
+        if not any(c in _GLOB_CHARS for c in pattern):
+            rules.append(_IgnoreRule(negated, pattern, None, None, None))
+            continue
+        part_re = None
         if "/" not in pattern:
-            matched = matched or any(fnmatch.fnmatch(part, pattern) for part in path.parts)
-        if matched:
-            ignored = not negated
+            part_re = re.compile(fnmatch.translate(pattern))
+        rules.append(
+            _IgnoreRule(
+                negated,
+                None,
+                re.compile(fnmatch.translate(pattern)),
+                re.compile(fnmatch.translate(f"{pattern}/**")),
+                part_re,
+            )
+        )
+    return rules
+
+
+def _split_exclude_patterns(patterns: set[str]) -> tuple[frozenset[str], tuple[re.Pattern[str], ...]]:
+    """Split directory-exclude patterns into literals and compiled globs."""
+    literals: set[str] = set()
+    globs: list[re.Pattern[str]] = []
+    for pattern in patterns:
+        if not any(c in _GLOB_CHARS for c in pattern):
+            literals.add(os.path.normcase(pattern))
+        else:
+            globs.append(re.compile(fnmatch.translate(os.path.normcase(pattern))))
+    return frozenset(literals), tuple(globs)
+
+
+def _is_ignored(path: Path, rules: list[_IgnoreRule]) -> bool:
+    """Apply compiled gitignore-style patterns, including later negation."""
+    value = os.path.normcase(path.as_posix())
+    parts = tuple(os.path.normcase(part) for part in path.parts)
+    ignored = False
+    for rule in rules:
+        if rule.matches(value, parts):
+            ignored = not rule.negated
     return ignored
 
 
@@ -227,20 +305,24 @@ class ExtractionPipeline:
                 if line and not line.startswith("#"):
                     ignore_patterns.append(line)
 
-        # Prune default build/dependency directories before descending. Path.rglob
-        # still walks excluded trees such as target/ and node_modules/, which can
-        # dominate discovery time even though none of their files are retained.
+        # Prune default build/dependency directories before descending.
+        # os.walk still descends into excluded trees such as target/ and
+        # node_modules/, which can dominate discovery time even though none
+        # of their files are retained.
+        exclude_literals, exclude_globs = _split_exclude_patterns(exclude)
+        rules = _compile_ignore_patterns(ignore_patterns)
         for directory, dirnames, filenames in os.walk(root, topdown=True):
             dirnames[:] = [
                 name
                 for name in dirnames
-                if not any(fnmatch.fnmatch(name, pattern) for pattern in exclude)
+                if os.path.normcase(name) not in exclude_literals
+                and not any(glob.match(os.path.normcase(name)) for glob in exclude_globs)
             ]
             directory_path = Path(directory)
             for filename in filenames:
                 path = directory_path / filename
                 relative = path.relative_to(root)
-                if _is_ignored(relative, ignore_patterns):
+                if _is_ignored(relative, rules):
                     continue
                 if self.is_supported(path):
                     files.append(path)
@@ -265,6 +347,7 @@ class ExtractionPipeline:
         5. Resolve calls
         6. Build flows
         """
+        root = root.resolve()
         files = self.discover_files(root)
         logger.info("Discovered %d source files in %s", len(files), root)
 
@@ -399,27 +482,21 @@ class ExtractionPipeline:
         if spec is None:
             return
 
-        try:
-            source = file_path.read_text(
-                encoding="utf-8", errors="strict" if self.strict else "replace"
-            )
-        except OSError:
-            if self.strict:
-                raise
-            return
-
-        # Compute hash for incremental updates
-        file_hash = hashlib.sha256(source.encode()).hexdigest()
         file_key = f"file::{rel_path}"
+        file_hash = self._file_hashes[rel_path.as_posix()]
 
         # Each language has a dedicated tree-sitter extractor with grammar-
         # correct symbol, call, import, and inheritance handling. Pass the
         # pipeline's path-qualified file key so equal stems in different
-        # directories cannot collide when fragments are merged.
+        # directories cannot collide when fragments are merged. The
+        # extractor reads the file itself, so the shared bytes above are
+        # used only for hashing and the generic fallback below.
         extractor = _DEDICATED_EXTRACTORS.get(spec.name)
         if extractor is not None:
             extractor(file_path, self.graph, file_qn=file_key, source_path=rel_path)
             return
+
+        source = raw.decode("utf-8") if self.strict else raw.decode("utf-8", errors="replace")
 
         # Fallback generic walker for languages without a dedicated extractor.
         file_node = Node.new(NodeKind.FILE, file_key)
@@ -982,7 +1059,7 @@ class ExtractionPipeline:
         }
 
         seen: set[tuple[NodeId, NodeId]] = set()
-        for _, source_id, target_id, edge in self.graph.edges():
+        for _, source_id, target_id, edge in list(self.graph.edges()):
             if edge.kind != EdgeKind.CALLS:
                 continue
             source = self.graph.node(source_id)
@@ -1087,7 +1164,7 @@ class ExtractionPipeline:
             ).with_property("_stub", True)
             stub_id = self.graph.add_node(stub)
             self.graph.remove_edge_by_kind(src_id, dst_id, edge.kind)
-            self.graph.add_edge(src_id, stub_id, edge.kind)
+            self.graph.add_edge(src_id, stub_id, Edge(edge.kind, edge.confidence))
             stub_count += 1
 
         if stub_count:

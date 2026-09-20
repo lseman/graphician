@@ -228,11 +228,14 @@ class Graph:
     # ── Iteration ────────────────────────────────────────────────────
 
     def nodes(self) -> Iterator[tuple[NodeId, Node]]:
-        for idx in sorted(self._nodes.keys()):
-            yield NodeId(idx), self._nodes[idx]
+        # Node IDs are assigned monotonically and never reused, so dict
+        # insertion order is identical to sorted ID order.  Loaders insert
+        # rows in ID order (``ORDER BY id``), keeping the invariant intact.
+        for idx, node in self._nodes.items():
+            yield NodeId(idx), node
 
     def edges(self) -> Iterator[tuple[EdgeId, NodeId, NodeId, Edge]]:
-        for eid, (src, dst, edge) in sorted(self._edges.items()):
+        for eid, (src, dst, edge) in self._edges.items():
             yield EdgeId(eid), NodeId(src), NodeId(dst), edge
 
     def out_neighbors(self, id: NodeId) -> Iterator[tuple[NodeId, Edge]]:
@@ -251,6 +254,22 @@ class Graph:
     def edge_count(self) -> int:
         return len(self._edges)
 
+    def in_degree_by_kind(self, kind: EdgeKind) -> dict[int, int]:
+        """Count in-edges of ``kind`` per node, keyed by raw node index.
+
+        One O(E) pass replaces repeated per-node ``in_neighbors`` scans in
+        phases that only need the aggregate count.
+        """
+        counts: dict[int, int] = {}
+        for dst, neighbors in self._in.items():
+            total = 0
+            for _src, eid in neighbors:
+                if self._edges[eid][2].kind == kind:
+                    total += 1
+            if total:
+                counts[dst] = total
+        return counts
+
     # ── Merge ────────────────────────────────────────────────────────
 
     def merge(self, other: Graph) -> None:
@@ -259,30 +278,33 @@ class Graph:
         Nodes with matching qualified names are deduplicated. Edges are
         added with original semantics — duplicates skipped.
         """
-        own_qn: dict[str, NodeId] = {
-            node.qualified_name: NodeId(index)
-            for index, node in self._nodes.items()
-        }
+        by_qname = self._by_qname
         remap: dict[int, NodeId] = {}
 
-        for other_id, node in other.nodes():
-            qn = node.qualified_name
-            if qn in own_qn:
-                mapped = own_qn[qn]
-            else:
-                mapped = self.add_node(node)
-                own_qn[qn] = mapped
-            remap[other_id.value] = mapped
+        # ``_by_qname`` is the same mapping the old implementation rebuilt
+        # from scratch on every merge, so reuse it directly.
+        for other_id, node in other._nodes.items():
+            mapped_index = by_qname.get(node.qualified_name)
+            remap[other_id] = (
+                self.add_node(node) if mapped_index is None else NodeId(mapped_index)
+            )
 
-        for _, src, dst, edge in other.edges():
-            si = remap.get(src.value)
-            di = remap.get(dst.value)
-            if si is None or di is None:
+        # Existing (src, dst, kind) triples in one O(E) pass replace a
+        # per-edge adjacency scan; new edges added during the merge are
+        # recorded as they go so later duplicates are caught too.
+        existing_kinds: set[tuple[int, int, EdgeKind]] = {
+            (src, dst, edge.kind) for _, (src, dst, edge) in self._edges.items()
+        }
+
+        for _other_eid, (other_src, other_dst, edge) in other._edges.items():
+            si = remap.get(other_src)
+            di = remap.get(other_dst)
+            if si is None or di is None or si == di:
                 continue
-            if si == di:
+            if (si.value, di.value, edge.kind) in existing_kinds:
                 continue
-            if not self._has_edge_kind(si.value, di.value, edge.kind):
-                self.add_edge(si, di, edge)
+            existing_kinds.add((si.value, di.value, edge.kind))
+            self.add_edge(si, di, edge)
 
     # ── Internal helpers ─────────────────────────────────────────────
 
@@ -348,3 +370,18 @@ class Graph:
             if d == dst and edge.kind == kind:
                 return True
         return False
+
+
+def scope_key(graph: Graph, function_id: NodeId) -> str:
+    """Stable identifier for the function scope owning scoped nodes.
+
+    Variable/parameter/return nodes are qualified by the enclosing
+    function's qualified name rather than its insertion-order integer
+    NodeId, which would shift whenever node emission order changes
+    (different extractor implementations, worker scheduling, file sets)
+    and break QN stability across builds.
+    """
+    node = graph.node(function_id)
+    if node is not None:
+        return node.qualified_name
+    return f"func::{function_id.value}"

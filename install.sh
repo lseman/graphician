@@ -37,7 +37,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "  --uninstall   Remove agent skill (keeps Python package)"
             echo "  --dev         Install dev dependencies too"
-            echo "  --system      Install system-wide (requires sudo)"
+            echo "  --system      Install system-wide via pipx (recommended)"
             exit 0
             ;;
         *) error "Unknown option: $1"; exit 1 ;;
@@ -64,29 +64,20 @@ fi
 # ── Install Python package ───────────────────────────────────────────────────
 info "Installing graphician Python package..."
 
-if $WITH_DEV; then
-    PIP_ARGS="-e .[dev]"
-elif $WITH_SYSTEM; then
-    PIP_ARGS="-e . --break-system-packages"
-    info "Installing system-wide (requires sudo for some steps)"
-    if [[ $EUID -ne 0 ]]; then
-        warn "Not running as root. Use 'sudo ./install.sh --system' for true system-wide install."
-    fi
-else
-    PIP_ARGS="-e ."
-fi
-
-python -m pip install $PIP_ARGS 2>&1 | tail -3 || {
-    # Handle PEP 668: externally managed environment
-    if [[ $EUID -eq 0 ]] || [[ "${VIRTUAL_ENV:-}" != "" ]]; then
-        # Running as root or in venv - try with --break-system-packages
-        warn "Retrying with --break-system-packages..."
-        python -m pip install $PIP_ARGS --break-system-packages 2>&1 | tail -3
-    else
-        error "PEP 668: externally managed environment. Use --system or activate a venv first."
+if $WITH_SYSTEM; then
+    if ! command -v pipx &>/dev/null; then
+        error "pipx is required for system-wide installs. Install it first:"
+        error "  sudo dnf install pipx      # Fedora/RHEL"
+        error "  sudo apt install pipx       # Debian/Ubuntu"
+        error "  brew install pipx           # macOS"
         exit 1
     fi
-}
+    pipx install --editable . 2>&1
+elif $WITH_DEV; then
+    pip install -e .[dev] 2>&1
+else
+    pip install -e . 2>&1
+fi
 
 if ! python -c "import graphician" 2>/dev/null; then
     error "Failed to install graphician. Check the output above."
@@ -122,23 +113,20 @@ graphician build .
 # Build with specific languages
 graphician build . --python --typescript
 
-# Query the graph
-graphician query "How does authentication work?"
+# Search the graph
+graphician search "authentication"
 
 # Find impact of changes
-graphician impact src/auth.py
+graphician impact file::src/auth.py::authenticate
 
-# Show dependencies
-graphician deps src/main.py
+# Show callers of a symbol
+graphician callers file::src/main.py::main
 
 # Build and serve for interactive exploration
 graphician serve .
 
-# Build and show graph visualization
-graphician build . --viz
-
 # Incremental update
-graphician build . --update
+graphician update .
 ```
 
 ## What graphician is for
@@ -192,24 +180,24 @@ Wait for the build to complete. The graph is stored in `graphician.db` in the cu
 Run queries against the graph:
 
 ```bash
-$PYTHON -m graphician query "<your question>"
+$PYTHON -m graphician search "<your question>"
 ```
 
-For specific analysis tasks:
+For specific analysis tasks (targets are qualified names, e.g. `file::src/auth.py::authenticate`):
 ```bash
 # Impact analysis
-$PYTHON -m graphician impact src/auth.py
+$PYTHON -m graphician impact file::src/auth.py::authenticate
 
-# Dependency analysis
-$PYTHON -m graphician deps src/main.py
+# Callers of a symbol
+$PYTHON -m graphician callers file::src/main.py::main
 
-# Show call graph
-$PYTHON -m graphician call src/auth.py --depth 2
+# Bounded call-graph neighborhood
+$PYTHON -m graphician context file::src/auth.py::authenticate --max-hops 2
 ```
 
 ## Tips
 
-- For large codebases, use `--update` for incremental builds
+- Re-running `graphician build .` updates the graph incrementally
 - Use `--python --typescript --rust` to limit which languages to extract
 - The graph persists in `graphician.db` — no need to rebuild for queries
 - Use `graphician serve .` for an interactive web interface

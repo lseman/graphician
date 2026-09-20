@@ -66,14 +66,14 @@ def trace_flow(graph, entry, options) -> list:
     return [(nid, depth) for nid, depth, _ in scored]
 
 
-def _compute_criticality(graph, members, entry_name, is_test_entry):
+def _compute_criticality(graph, members, entry_name, is_test_entry, calls_fanin=None):
     """Criticality score in [0, 1]. Higher = more important."""
     size = len(members)
     size_score = min(max(size * 0.1, 0.0), 0.6) if size > 1 else 0.0
 
-    total_fanin = 0
-    for nid, _ in members:
-        total_fanin += sum(1 for _, e in graph.in_neighbors(nid) if e.kind == EdgeKind.CALLS)
+    if calls_fanin is None:
+        calls_fanin = graph.in_degree_by_kind(EdgeKind.CALLS)
+    total_fanin = sum(calls_fanin.get(nid.value, 0) for nid, _ in members)
     avg_fanin = total_fanin / size if size > 0 else 0.0
     reuse_score = min(avg_fanin / 8.0, 0.25)
 

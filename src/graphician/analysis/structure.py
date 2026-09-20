@@ -15,10 +15,11 @@ from typing import Any
 import networkx as nx
 import numpy as np
 
-from ..core.edge import EdgeKind
+from ..core.edge import Confidence, EdgeKind
 from ..core.graph import Graph
 from ..core.id import NodeId
 from ..core.node import NodeKind
+from .centrality import is_rank_noise, pagerank
 from .export import export_graphml  # noqa: F401 -- re-exported for `graphician.analysis`
 from .numba_graph_algs import has_numba as has_numba_algs
 from .refactoring.engine import find_dead_code as _refactor_find_dead_code
@@ -541,15 +542,15 @@ def find_god_nodes(
     graph: Graph,
     top: int = 20,
 ) -> dict[str, Any]:
-    """Top nodes by PageRank."""
-    from .centrality import pagerank
-
+    """Top nodes by PageRank, filtered to exclude synthetic noise."""
     scores = pagerank(graph, damping=0.85)
 
     gods: list[dict[str, Any]] = []
-    for nid, score in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top]:
+    for nid, score in sorted(scores.items(), key=lambda x: x[1], reverse=True):
+        if len(gods) >= top:
+            break
         node = graph.node(nid)
-        if node:
+        if node and not is_rank_noise(node):
             gods.append({
                 "qualified_name": node.qualified_name,
                 "kind": node.kind.value,
@@ -769,12 +770,17 @@ def _find_fan_out(nx_graph: nx.DiGraph, graph: Graph, threshold: int = 3) -> dic
 def compute_surprise_scoring(
     graph: Graph,
     communities: dict[int, set[int]] | None = None,
+    top: int = 50,
 ) -> dict[str, Any]:
-    """Unexpected cross-community / cross-language edges.
+    """Unexpected cross-community / cross-language edges with composite scoring.
 
-    Edges between nodes in different communities are "surprising" —
-    they indicate architectural coupling that may be intentional
-    (cross-cutting concern) or accidental (tight coupling).
+    Each surprise edge is scored on 5 weighted dimensions:
+      1. Confidence — inferred/ambiguous edges are more notable (0.25)
+      2. Cross filetype — code↔doc↔pdf edges signal cross-modal coupling (0.20)
+      3. Cross repo — edges spanning different repos (0.15)
+      4. Cross community — default surprise signal (0.20)
+      5. Peripheral→hub — low-degree node reaching a high-degree hub
+         signals unusual dependency (0.20)
     """
     if communities is None:
         from .communities.louvain import detect_communities
@@ -787,30 +793,92 @@ def compute_surprise_scoring(
                 if nid:
                     communities.setdefault(comm["id"], set()).add(nid.value)
 
-    _to_nx(graph)
+    # Pre-compute node degrees for peripheral→hub scoring
+    node_degrees: dict[int, int] = {}
+    for nid, _ in graph.nodes():
+        node_degrees[nid.value] = sum(1 for _ in graph.out_neighbors(nid)) + sum(1 for _ in graph.in_neighbors(nid))
+
+    confidence_w = 0.25
+    filetype_w = 0.20
+    cross_repo_w = 0.15
+    community_w = 0.20
+    peripheral_hub_w = 0.20
+
     surprises: list[dict[str, Any]] = []
 
     for _, src, dst, edge in graph.edges():
         src_comm = _find_community(src.value, communities)
         dst_comm = _find_community(dst.value, communities)
+        src_node = graph.node(src)
+        dst_node = graph.node(dst)
+        if not src_node or not dst_node:
+            continue
 
-        if src_comm != dst_comm and src_comm >= 0 and dst_comm >= 0:
-            src_node = graph.node(src)
-            dst_node = graph.node(dst)
-            if src_node and dst_node:
-                surprises.append({
-                    "source": src_node.qualified_name,
-                    "source_kind": src_node.kind.value,
-                    "target": dst_node.qualified_name,
-                    "target_kind": dst_node.kind.value,
-                    "edge_kind": edge.kind.value,
-                    "from_community": src_comm,
-                    "to_community": dst_comm,
-                    "surprise_score": 1.0 / abs(src_comm - dst_comm) if src_comm != dst_comm else 0.0,
-                })
+        # Only cross-community edges qualify as surprising
+        if not (src_comm != dst_comm and src_comm >= 0 and dst_comm >= 0):
+            continue
+
+        score = 0.0
+        factors: dict[str, float] = {}
+
+        # 1. Confidence weight — INFERRED/AMBIGUOUS edges are more notable
+        if edge.confidence == Confidence.INFERRED:
+            factors["confidence"] = 0.7
+        elif edge.confidence == Confidence.AMBIGUOUS:
+            factors["confidence"] = 1.0
+        else:
+            factors["confidence"] = 0.0
+
+        # 2. Cross filetype — code↔doc↔pdf edges
+        code_kinds = {NodeKind.CLASS, NodeKind.FUNCTION, NodeKind.METHOD,
+                      NodeKind.TRAIT, NodeKind.IMPL, NodeKind.TYPE, NodeKind.VARIABLE}
+        doc_kinds = {NodeKind.DOCUMENT, NodeKind.SECTION, NodeKind.CONCEPT}
+        src_code = src_node.kind in code_kinds
+        dst_code = dst_node.kind in code_kinds
+        src_doc = src_node.kind in doc_kinds
+        dst_doc = dst_node.kind in doc_kinds
+        factors["cross_filetype"] = 1.0 if (src_code != dst_code) or (src_doc != dst_doc) else 0.0
+
+        # 3. Cross repo — based on source_uri prefix
+        src_repo = src_node.source_uri.split("/")[0] if src_node.source_uri else ""
+        dst_repo = dst_node.source_uri.split("/")[0] if dst_node.source_uri else ""
+        factors["cross_repo"] = 1.0 if src_repo and dst_repo and src_repo != dst_repo else 0.0
+
+        # 4. Cross community — distance between communities
+        factors["cross_community"] = 1.0
+
+        # 5. Peripheral→hub — low-degree node reaching high-degree hub
+        src_deg = node_degrees.get(src.value, 0)
+        dst_deg = node_degrees.get(dst.value, 0)
+        max_deg = max(src_deg, dst_deg, 1)
+        if src_deg < dst_deg * 0.25:
+            factors["peripheral_to_hub"] = 1.0 - (src_deg / max_deg)
+        elif dst_deg < src_deg * 0.25:
+            factors["peripheral_to_hub"] = 1.0 - (dst_deg / max_deg)
+        else:
+            factors["peripheral_to_hub"] = 0.0
+
+        score = (confidence_w * factors["confidence"]
+                 + filetype_w * factors["cross_filetype"]
+                 + cross_repo_w * factors["cross_repo"]
+                 + community_w * factors["cross_community"]
+                 + peripheral_hub_w * factors["peripheral_to_hub"])
+
+        surprises.append({
+            "source": src_node.qualified_name,
+            "source_kind": src_node.kind.value,
+            "target": dst_node.qualified_name,
+            "target_kind": dst_node.kind.value,
+            "edge_kind": edge.kind.value,
+            "confidence": edge.confidence,
+            "from_community": src_comm,
+            "to_community": dst_comm,
+            "surprise_score": round(score, 3),
+            "factors": factors,
+        })
 
     surprises.sort(key=lambda s: s["surprise_score"], reverse=True)
-    return {"surprises": surprises[:50], "total": len(surprises)}
+    return {"surprises": surprises[:top], "total": len(surprises)}
 
 
 def _find_community(node_id: int, communities: dict[int, set[int]]) -> int:

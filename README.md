@@ -158,10 +158,10 @@ src/graphician/
 Output from `graphician status` on this repository:
 
 ```
-Graph stats: 16489 nodes, 35621 edges
+Graph stats: 18165 nodes, 39969 edges
 
-Node kinds: 12756 variable, 1326 function, 576 method, 285 module, 253 class, 226 file, 928 flow
-Edge kinds: 13482 data_flow, 10147 member_of, 6034 calls, 2110 defines, 1709 tested_by, 1112 imports
+Node kinds: 13983 variable, 1360 function, 1090 flow, 752 method, 319 class, 293 module, 231 file
+Edge kinds: 14759 data_flow, 11620 member_of, 6849 calls, 2367 defines, 2099 tested_by, 1092 imports, 1090 entry_of
 ```
 
 ## Benchmarks
@@ -170,15 +170,15 @@ Native (Rust/PyO3) vs. pure-Python implementations, measured on this repository:
 
 | Operation | Python | Native | Speedup |
 |---|---:|---:|---:|
-| Full CLI build and SQLite save | 2.06 s | 1.392 s (median) | ~1.5x |
-| Type resolution (1,500 unique placeholders) | 740.081 ms | 21.538 ms | 34.4x |
-| Rust extraction (500 functions) | 41.62 ms | 9.14 ms | 4.55x |
-| Call resolution (3,000 ambiguous calls) | 37.786 ms | 18.840 ms | 2.01x |
-| Full SQLite load (5K nodes / 15K edges) | 55.197 ms | 37.424 ms | 1.48x |
-| Incremental SQLite save (1% nodes changed) | 55.438 ms | 39.119 ms | 1.42x |
-| Full SQLite save (5K nodes / 15K edges) | 60.351 ms | 49.473 ms | 1.22x |
-| Flow materialization | 0.230 s | 0.125 s | 1.84x |
-| Native snapshot access (10K nodes / 30K edges, reused) | 40.952 ms (cold) | 22.266 ms | 1.84x |
+| Full CLI build and SQLite save | 2.103 s | 1.866 s (median) | ~1.1x |
+| Type resolution (1,500 unique placeholders) | 798.119 ms | 13.720 ms | 58.2x |
+| Rust extraction (500 functions) | 35.56 ms | 8.29 ms | 4.29x |
+| Call resolution (3,000 ambiguous calls) | 42.252 ms | 22.204 ms | 1.90x |
+| Full SQLite load (5K nodes / 15K edges) | 95.731 ms | 78.595 ms | 1.22x |
+| Incremental SQLite save (1% nodes changed) | 52.859 ms | 35.874 ms | 1.47x |
+| Full SQLite save (5K nodes / 15K edges) | 59.548 ms | 49.563 ms | 1.20x |
+| Flow materialization | 0.358 s | 0.180 s | ~2.0x |
+| Native snapshot access (10K nodes / 30K edges, reused) | 42.072 ms (cold) | 20.919 ms | 2.01x |
 
 Native extraction is enabled for Rust, TypeScript, JavaScript, Java, and C++, with
 automatic fallback to the Python implementation (`GRAPHICIAN_NATIVE_EXTRACTORS=0`
@@ -206,7 +206,7 @@ of an unambiguous local call.
 Graphician auto-discovers `graphician.db` in the current directory. Store file path:
 
 ```bash
-graphician build --db /custom/path/graphician.db
+graphician --db /custom/path/graphician.db build .
 ```
 
 ## Development

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..core.edge import Edge, EdgeKind
-from ..core.graph import Graph
+from ..core.graph import Graph, scope_key
 from ..core.id import NodeId
 from ..core.node import Node, NodeKind
 
@@ -217,14 +217,14 @@ def _ts_extract_python_assignment(
         if not var_name or var_name.startswith("_"):
             continue
 
-        var_qn = f"var::{function_id.value}::{var_name}"
+        var_qn = f"var::{scope_key(graph, function_id)}::{var_name}"
         var_id = ensure_variable_node(graph, function_id, var_qn, var_name)
 
         # Check if value references params
         value_text = _ts_node_text(value, source_text)
         for param in params:
             if param in value_text:
-                param_qn = f"param::{function_id.value}::{param}"
+                param_qn = f"param::{scope_key(graph, function_id)}::{param}"
                 param_id = ensure_variable_node(graph, function_id, param_qn, param)
                 if not _has_edge_kind(graph, param_id, var_id, EdgeKind.DATA_FLOW):
                     graph.add_edge(param_id, var_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -260,7 +260,7 @@ def _ts_extract_python_assignment(
             parts = _ts_python_dotted_parts(target, source_text)
             if parts and parts[0] == "self" and len(parts) > 1:
                 field_name = parts[1]
-                field_qn = f"var::{function_id.value}::self.{field_name}"
+                field_qn = f"var::{scope_key(graph, function_id)}::self.{field_name}"
                 field_id = ensure_variable_node(graph, function_id, field_qn, f"self.{field_name}")
                 if not _has_edge_kind(graph, var_id, field_id, EdgeKind.DATA_FLOW):
                     graph.add_edge(var_id, field_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -295,11 +295,11 @@ def _ts_extract_python_method_chain(
         base = func.children[0]
         chain_name = _ts_python_call_chain(base, source_text)
         if chain_name and any(p in chain_name for p in params):
-            chain_qn = f"var::{function_id.value}::chain_{chain_name.split('.')[-1]}"
+            chain_qn = f"var::{scope_key(graph, function_id)}::chain_{chain_name.split('.')[-1]}"
             chain_id = ensure_variable_node(graph, function_id, chain_qn, chain_name)
             for param in params:
                 if param in chain_name:
-                    param_qn = f"param::{function_id.value}::{param}"
+                    param_qn = f"param::{scope_key(graph, function_id)}::{param}"
                     param_id = ensure_variable_node(graph, function_id, param_qn, param)
                     if not _has_edge_kind(graph, param_id, chain_id, EdgeKind.DATA_FLOW):
                         graph.add_edge(param_id, chain_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -328,14 +328,14 @@ def _ts_extract_python_return(
     if not node:
         return
 
-    return_qn = f"return::{function_id.value}"
+    return_qn = f"return::{scope_key(graph, function_id)}"
     return_id = ensure_variable_node(graph, function_id, return_qn, "return_value")
     return_text = _ts_node_text(node, source_text)
 
     # Check if return references params
     for param in params:
         if param in return_text:
-            param_qn = f"param::{function_id.value}::{param}"
+            param_qn = f"param::{scope_key(graph, function_id)}::{param}"
             param_id = ensure_variable_node(graph, function_id, param_qn, param)
             if not _has_edge_kind(graph, param_id, return_id, EdgeKind.DATA_FLOW):
                 graph.add_edge(param_id, return_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -481,13 +481,13 @@ def _ts_extract_rust_let(
     if not let_name or let_name.startswith("_"):
         return
 
-    let_qn = f"var::{function_id.value}::{let_name}"
+    let_qn = f"var::{scope_key(graph, function_id)}::{let_name}"
     let_id = ensure_variable_node(graph, function_id, let_qn, let_name)
 
     value_text = _ts_rust_expr_text(value, source_text)
     for param in params:
         if param in value_text:
-            param_qn = f"param::{function_id.value}::{param}"
+            param_qn = f"param::{scope_key(graph, function_id)}::{param}"
             param_id = ensure_variable_node(graph, function_id, param_qn, param)
             if not _has_edge_kind(graph, param_id, let_id, EdgeKind.DATA_FLOW):
                 graph.add_edge(param_id, let_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -519,7 +519,7 @@ def _ts_extract_rust_let(
 
     # Track ? operator for error flow
     if "?" in value_text:
-        error_qn = f"error::{function_id.value}::{let_name}"
+        error_qn = f"error::{scope_key(graph, function_id)}::{let_name}"
         error_id = ensure_variable_node(graph, function_id, error_qn, f"{let_name}?.error")
         if not _has_edge_kind(graph, let_id, error_id, EdgeKind.DATA_FLOW):
             graph.add_edge(let_id, error_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -548,13 +548,13 @@ def _ts_extract_rust_return(
     if not node:
         return
 
-    return_qn = f"return::{function_id.value}"
+    return_qn = f"return::{scope_key(graph, function_id)}"
     return_id = ensure_variable_node(graph, function_id, return_qn, "return_value")
     return_text = _ts_rust_expr_text(node, source_text)
 
     for param in params:
         if param in return_text:
-            param_qn = f"param::{function_id.value}::{param}"
+            param_qn = f"param::{scope_key(graph, function_id)}::{param}"
             param_id = ensure_variable_node(graph, function_id, param_qn, param)
             if not _has_edge_kind(graph, param_id, return_id, EdgeKind.DATA_FLOW):
                 graph.add_edge(param_id, return_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -605,9 +605,9 @@ def _ts_extract_rust_expression(
             chain_text = _ts_rust_call_chain_text(func, source_text)
             for param in params:
                 if param in chain_text:
-                    chain_qn = f"var::{function_id.value}::chain_{param}"
+                    chain_qn = f"var::{scope_key(graph, function_id)}::chain_{param}"
                     chain_id = ensure_variable_node(graph, function_id, chain_qn, chain_text)
-                    param_qn = f"param::{function_id.value}::{param}"
+                    param_qn = f"param::{scope_key(graph, function_id)}::{param}"
                     param_id = ensure_variable_node(graph, function_id, param_qn, param)
                     if not _has_edge_kind(graph, param_id, chain_id, EdgeKind.DATA_FLOW):
                         graph.add_edge(param_id, chain_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -726,13 +726,13 @@ def _ts_extract_ts_let(
     if not var_name or var_name.startswith("_"):
         return
 
-    var_qn = f"var::{function_id.value}::{var_name}"
+    var_qn = f"var::{scope_key(graph, function_id)}::{var_name}"
     var_id = ensure_variable_node(graph, function_id, var_qn, var_name)
 
     value_text = _ts_ts_node_text(value, source_text)
     for param in params:
         if param in value_text:
-            param_qn = f"param::{function_id.value}::{param}"
+            param_qn = f"param::{scope_key(graph, function_id)}::{param}"
             param_id = ensure_variable_node(graph, function_id, param_qn, param)
             if not _has_edge_kind(graph, param_id, var_id, EdgeKind.DATA_FLOW):
                 graph.add_edge(param_id, var_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -779,12 +779,12 @@ def _ts_extract_ts_expression(
         if left and right:
             var_name = _ts_ts_identifier_name(left)
             if var_name and not var_name.startswith("_"):
-                var_qn = f"var::{function_id.value}::{var_name}"
+                var_qn = f"var::{scope_key(graph, function_id)}::{var_name}"
                 var_id = ensure_variable_node(graph, function_id, var_qn, var_name)
                 value_text = _ts_ts_node_text(right, source_text)
                 for param in params:
                     if param in value_text:
-                        param_qn = f"param::{function_id.value}::{param}"
+                        param_qn = f"param::{scope_key(graph, function_id)}::{param}"
                         param_id = ensure_variable_node(graph, function_id, param_qn, param)
                         if not _has_edge_kind(graph, param_id, var_id, EdgeKind.DATA_FLOW):
                             graph.add_edge(param_id, var_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -819,11 +819,11 @@ def _ts_extract_ts_expression(
         if func:
             chain_text = _ts_ts_call_chain_text(func, source_text)
             if chain_text and any(p in chain_text for p in params):
-                chain_qn = f"var::{function_id.value}::chain_{chain_text.split('.')[-1]}"
+                chain_qn = f"var::{scope_key(graph, function_id)}::chain_{chain_text.split('.')[-1]}"
                 chain_id = ensure_variable_node(graph, function_id, chain_qn, chain_text)
                 for param in params:
                     if param in chain_text:
-                        param_qn = f"param::{function_id.value}::{param}"
+                        param_qn = f"param::{scope_key(graph, function_id)}::{param}"
                         param_id = ensure_variable_node(graph, function_id, param_qn, param)
                         if not _has_edge_kind(graph, param_id, chain_id, EdgeKind.DATA_FLOW):
                             graph.add_edge(param_id, chain_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -852,13 +852,13 @@ def _ts_extract_ts_return(
     if not node:
         return
 
-    return_qn = f"return::{function_id.value}"
+    return_qn = f"return::{scope_key(graph, function_id)}"
     return_id = ensure_variable_node(graph, function_id, return_qn, "return_value")
     return_text = _ts_ts_node_text(node, source_text)
 
     for param in params:
         if param in return_text:
-            param_qn = f"param::{function_id.value}::{param}"
+            param_qn = f"param::{scope_key(graph, function_id)}::{param}"
             param_id = ensure_variable_node(graph, function_id, param_qn, param)
             if not _has_edge_kind(graph, param_id, return_id, EdgeKind.DATA_FLOW):
                 graph.add_edge(param_id, return_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -987,13 +987,13 @@ def _ts_extract_java_var(
     if not var_name or var_name.startswith("_"):
         return
 
-    var_qn = f"var::{function_id.value}::{var_name}"
+    var_qn = f"var::{scope_key(graph, function_id)}::{var_name}"
     var_id = ensure_variable_node(graph, function_id, var_qn, var_name)
 
     value_text = _ts_ts_node_text(value_node, source_text)
     for param in params:
         if param in value_text:
-            param_qn = f"param::{function_id.value}::{param}"
+            param_qn = f"param::{scope_key(graph, function_id)}::{param}"
             param_id = ensure_variable_node(graph, function_id, param_qn, param)
             if not _has_edge_kind(graph, param_id, var_id, EdgeKind.DATA_FLOW):
                 graph.add_edge(param_id, var_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -1036,13 +1036,13 @@ def _ts_extract_java_return(
     if not node:
         return
 
-    return_qn = f"return::{function_id.value}"
+    return_qn = f"return::{scope_key(graph, function_id)}"
     return_id = ensure_variable_node(graph, function_id, return_qn, "return_value")
     return_text = _ts_ts_node_text(node, source_text)
 
     for param in params:
         if param in return_text:
-            param_qn = f"param::{function_id.value}::{param}"
+            param_qn = f"param::{scope_key(graph, function_id)}::{param}"
             param_id = ensure_variable_node(graph, function_id, param_qn, param)
             if not _has_edge_kind(graph, param_id, return_id, EdgeKind.DATA_FLOW):
                 graph.add_edge(param_id, return_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -1102,13 +1102,13 @@ def extract_assignments(
             continue
 
         # Create variable node
-        var_qn = f"var::{function_id.value}::{var_name}"
+        var_qn = f"var::{scope_key(graph, function_id)}::{var_name}"
         var_id = ensure_variable_node(graph, function_id, var_qn, var_name)
 
         # Emit DataFlow from params if expr references them
         for param in params:
             if param in expr:
-                param_qn = f"param::{function_id.value}::{param}"
+                param_qn = f"param::{scope_key(graph, function_id)}::{param}"
                 param_id = ensure_variable_node(graph, function_id, param_qn, param)
                 if not _has_edge_kind(graph, param_id, var_id, EdgeKind.DATA_FLOW):
                     graph.add_edge(param_id, var_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -1168,9 +1168,9 @@ def extract_return_flow(
         # Check if return value references a parameter
         for param in params:
             if param in return_expr:
-                return_qn = f"return::{function_id.value}"
+                return_qn = f"return::{scope_key(graph, function_id)}"
                 return_id = ensure_variable_node(graph, function_id, return_qn, "return_value")
-                param_qn = f"param::{function_id.value}::{param}"
+                param_qn = f"param::{scope_key(graph, function_id)}::{param}"
                 param_id = ensure_variable_node(graph, function_id, param_qn, param)
                 if not _has_edge_kind(graph, param_id, return_id, EdgeKind.DATA_FLOW):
                     graph.add_edge(param_id, return_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -1187,7 +1187,7 @@ def extract_return_flow(
                     ))
 
         # Emit DataFlow from function to its return value
-        return_qn = f"return::{function_id.value}"
+        return_qn = f"return::{scope_key(graph, function_id)}"
         return_id = ensure_variable_node(graph, function_id, return_qn, "return_value")
         if not _has_edge_kind(graph, function_id, return_id, EdgeKind.DATA_FLOW):
             graph.add_edge(function_id, return_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -1228,13 +1228,13 @@ def extract_field_assignments(
                     if not field_name or field_name.startswith("_"):
                         continue
 
-                    field_qn = f"var::{function_id.value}::self.{field_name}"
+                    field_qn = f"var::{scope_key(graph, function_id)}::self.{field_name}"
                     field_id = ensure_variable_node(graph, function_id, field_qn, f"self.{field_name}")
 
                     # Check if expr references params
                     for param in params:
                         if param in expr:
-                            param_qn = f"param::{function_id.value}::{param}"
+                            param_qn = f"param::{scope_key(graph, function_id)}::{param}"
                             param_id = ensure_variable_node(graph, function_id, param_qn, param)
                             if not _has_edge_kind(graph, param_id, field_id, EdgeKind.DATA_FLOW):
                                 graph.add_edge(param_id, field_id, Edge.extracted(EdgeKind.DATA_FLOW))
@@ -1482,7 +1482,7 @@ def ensure_variable_node(
         kind=NodeKind.VARIABLE,
         name=name,
         qualified_name=qn,
-    ).with_property("function_id", str(function_id.value))
+    ).with_property("function_id", scope_key(graph, function_id))
     return graph.add_node(node)
 
 

@@ -44,8 +44,9 @@ def test_native_graph_validates_ids_and_preserves_ambiguous_edges() -> None:
     assert graph.traverse(10, max_hops=1) == [20, 30]
     with pytest.raises(ValueError, match="unique"):
         NativeGraph([10, 10], [])
-    with pytest.raises(ValueError, match="not present"):
-        NativeGraph([10], [(10, 20, "calls", "extracted")])
+    dangling = NativeGraph([10], [(10, 20, "calls", "extracted")])
+    assert dangling.edge_count == 0
+    assert dangling.skipped_edges == 1
 
 
 def test_native_graph_personalized_pagerank_biases_seed() -> None:

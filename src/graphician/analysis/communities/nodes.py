@@ -9,6 +9,7 @@ import networkx as nx
 from ...core.graph import Graph
 from ...core.id import NodeId
 from ...core.node import Node, NodeKind
+from ..centrality import _BUILTIN_NOISE, _JSON_KEY_NOISE
 from .utils import _qualified_name_or_fallback, _to_networkx
 
 
@@ -88,15 +89,17 @@ def find_god_nodes(
     graph: Graph,
     top: int = 20,
 ) -> dict[str, Any]:
-    """Find top nodes by PageRank."""
+    """Find top nodes by PageRank, filtered to exclude synthetic noise."""
     from ..centrality import pagerank
 
     scores = pagerank(graph, damping=0.85)
 
     gods: list[dict[str, Any]] = []
-    for nid, score in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top]:
+    for nid, score in sorted(scores.items(), key=lambda x: x[1], reverse=True):
+        if len(gods) >= top:
+            break
         node = graph.node(nid)
-        if node:
+        if node and not is_rank_noise(node):
             gods.append({
                 "qualified_name": node.qualified_name,
                 "kind": node.kind.value,
@@ -146,11 +149,31 @@ def compute_centrality(
 def is_rank_noise(node: Node) -> bool:
     """True for nodes that inflate god-node rankings without representing a real symbol.
 
-    Filters out file containers (high degree purely from Defines edges),
-    synthetic flow and hyperedge nodes, and unresolved call placeholders.
-
-    Mirrors the Rust ``is_rank_noise`` from ``centrality.rs``.
+    Filters out file containers, synthetic flow and hyperedge nodes, unresolved call
+    placeholders, concept nodes, builtin type names, method stubs, JSON-key
+    identifiers, and file-level hubs.
     """
     if node.kind in (NodeKind.FILE, NodeKind.FLOW, NodeKind.HYPEREDGE):
         return True
-    return bool(node.qualified_name.startswith("call::"))
+    if node.qualified_name.startswith("call::"):
+        return True
+    if node.kind == NodeKind.CONCEPT:
+        return True
+    if len(node.name) == 1 or (len(node.name) > 0 and node.name.isdigit()):
+        return True
+    # Method stubs: synthetic AST nodes like ".method_name()" or "function_name()"
+    if node.name.startswith(".") or (node.name.endswith("()") and node.kind in (NodeKind.FUNCTION, NodeKind.METHOD)):
+        return True
+    # File-level hub: node name matches the source filename
+    if node.source_uri:
+        basename = node.source_uri.rsplit("/", 1)[-1]
+        if basename and node.name == basename.rsplit(".", 1)[0]:
+            return True
+    # JSON key nodes
+    if (
+        node.source_uri
+        and node.source_uri.lower().endswith(".json")
+        and node.name in _JSON_KEY_NOISE
+    ):
+        return True
+    return node.name in _BUILTIN_NOISE

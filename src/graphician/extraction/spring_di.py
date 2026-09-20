@@ -119,7 +119,7 @@ def _collect_injection_sites(graph: Graph) -> list[_InjectionSite]:
                 isinstance(a, str) and a == "Autowired" for a in annotations
             )
 
-        is_ctor_param = "::param::" in node.qualified_name
+        is_ctor_param = node.qualified_name.startswith("param::")
         if not is_autowired and not is_ctor_param:
             continue
 

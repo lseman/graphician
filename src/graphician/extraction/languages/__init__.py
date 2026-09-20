@@ -44,12 +44,17 @@ class LanguageSpec:
 class LanguageRegistry:
     """Registry mapping extensions → language specs."""
 
-    def __init__(self) -> None:
+    def __init__(self, languages: frozenset[Language] | None = None) -> None:
+        """Create a registry, optionally restricted to a subset of languages.
+
+        ``languages`` limits which language specs are registered; None
+        registers all supported languages.
+        """
         self._specs: dict[str, LanguageSpec] = {}
         self._lang_to_spec: dict[Language, LanguageSpec] = {}
-        self._register_builtins()
+        self._register_builtins(languages)
 
-    def _register_builtins(self) -> None:
+    def _register_builtins(self, languages: frozenset[Language] | None = None) -> None:
         """Register all built-in language specs."""
         import tree_sitter_cpp as tscpp
         import tree_sitter_go as tsgo
@@ -140,6 +145,8 @@ class LanguageRegistry:
         ]
 
         for spec in specs:
+            if languages is not None and spec.name not in languages:
+                continue
             self._specs[spec.name] = spec
             for ext in spec.extensions:
                 self._specs[ext] = spec

@@ -44,6 +44,7 @@ def compute_flows(graph, options=None):
         except (AttributeError, ImportError, RuntimeError, TypeError, ValueError):
             native_members = None
     produced = 0
+    calls_fanin = graph.in_degree_by_kind(EdgeKind.CALLS)
 
     for entry_index, entry in enumerate(entries):
         entry_node = graph.node(entry)
@@ -64,7 +65,7 @@ def compute_flows(graph, options=None):
 
         member_count = len(members)
         depth_reached = max((d for _, d in members), default=0)
-        criticality = _compute_criticality(graph, members, entry_name, is_test_entry)
+        criticality = _compute_criticality(graph, members, entry_name, is_test_entry, calls_fanin)
 
         flow_qn = f"flow::{entry_qn}"
         flow_node = (

@@ -181,11 +181,17 @@ def find_top_paths(
     graph: Graph,
     q: PathQuery,
     limit: int = 10,
+    expansion_budget: int = 200_000,
 ) -> list[WeightedPath]:
     """Dijkstra-style path search returning the best weighted paths.
 
     Uses edge-kind-dependent costs and diversity scoring to avoid
     returning multiple nearly-identical paths.
+
+    The search is bounded: each node is expanded at most ``limit``
+    times and total expansions never exceed ``expansion_budget``, so
+    the function terminates quickly even on dense graphs where the
+    number of simple paths is exponential.
     """
     if limit <= 0:
         return []
@@ -204,6 +210,8 @@ def find_top_paths(
 
     heap: list[_Candidate] = [_Candidate([q.from_id], 0.0)]
     chosen: list[WeightedPath] = []
+    node_expansions: dict[NodeId, int] = {}
+    expansions = 0
 
     while heap and len(chosen) < limit * 3:
         cand = heapq.heappop(heap) if heap else None
@@ -243,7 +251,15 @@ def find_top_paths(
                         continue
                     continue
 
-        # Expand
+        # Expand (bounded: per-node cap + total budget)
+        if expansions >= expansion_budget:
+            continue
+        if node_expansions.get(last, 0) >= limit:
+            continue
+        node_expansions[last] = node_expansions.get(last, 0) + 1
+        expansions += 1
+        if len(heap) > 4 * expansion_budget:
+            break
         for neighbor, edge in graph.out_neighbors(last):
             if neighbor in cand.nodes:
                 continue

@@ -5,10 +5,10 @@ from graphician.core.graph import Graph
 from graphician.core.node import Node, NodeKind
 from graphician.extraction.cross_language import (
     CrossLanguageRegistry,
-    enrich_with_cross_language_data,
-    resolve_cross_language_calls,
     _detect_ffi_boundaries,
     _infer_stub_dialect,
+    enrich_with_cross_language_data,
+    resolve_cross_language_calls,
 )
 
 

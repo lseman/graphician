@@ -212,6 +212,8 @@ _RE_PY_VAR_ASSIGN = re.compile(
     r"(\w+)\s*=\s*([A-Z]\w+)(?:\.\w+)*\s*[\(\{]"
 )
 _RE_IMPL_HEADER = re.compile(r"\bimpl(?:\s*<[^{}>]*>)?\s+([^{}]+?)\s*\{")
+# Compiled annotation-lookup patterns, cached per variable name.
+_ANNOTATION_PATTERNS: dict[str, re.Pattern[str]] = {}
 
 _NAME_TYPE_MAP: dict[str, str] = {
     "graph": "Graph", "main_graph": "Graph", "app_graph": "Graph",
@@ -261,6 +263,25 @@ def _infer_type_from_let_bindings(source: str, var_name: str) -> str | None:
     return None
 
 
+def _build_let_binding_map(source: str) -> dict[str, str]:
+    """Map every bound variable in ``source`` to its inferred type.
+
+    One pass per pattern; the first pattern that binds a variable wins,
+    mirroring the short-circuit order of ``_infer_type_from_let_bindings``.
+    """
+    binding_map: dict[str, str] = {}
+    for pattern in (
+        _RE_LET_ANNOT,
+        _RE_LET_CTOR,
+        _RE_LET_STRUCT,
+        _RE_PY_VAR_ANNOT,
+        _RE_PY_VAR_ASSIGN,
+    ):
+        for match in pattern.finditer(source):
+            binding_map.setdefault(match.group(1), match.group(2))
+    return binding_map
+
+
 def _leading_type_name(type_expr: str) -> str | None:
     """Return the main named type from a Rust-style type expression."""
     rest = type_expr.lstrip()
@@ -284,7 +305,11 @@ def _leading_type_name(type_expr: str) -> str | None:
 
 def _infer_type_from_annotations(source: str, var_name: str) -> str | None:
     """Infer a receiver type from a parameter or closure annotation."""
-    for match in re.finditer(rf"(?<!\w){re.escape(var_name)}(?!\w)\s*:\s*", source):
+    pattern = _ANNOTATION_PATTERNS.get(var_name)
+    if pattern is None:
+        pattern = re.compile(rf"(?<!\w){re.escape(var_name)}(?!\w)\s*:\s*")
+        _ANNOTATION_PATTERNS[var_name] = pattern
+    for match in pattern.finditer(source):
         inferred = _leading_type_name(source[match.end():])
         if inferred is not None:
             return inferred
@@ -296,7 +321,13 @@ def _infer_impl_type_from_source(source: str, line_start: int | None) -> str | N
     if line_start is None:
         return None
 
+    # Header offsets increase, so newline counts accumulate instead of
+    # rescanning from the start of the file for every header.
+    line_before = 0
+    previous = 0
     for match in _RE_IMPL_HEADER.finditer(source):
+        line_before += source.count("\n", previous, match.start())
+        previous = match.start()
         header = match.group(1).strip()
         target_expr = header.rsplit(" for ", 1)[-1]
         impl_type = _leading_type_name(target_expr)
@@ -305,17 +336,23 @@ def _infer_impl_type_from_source(source: str, line_start: int | None) -> str | N
 
         depth = 1
         position = match.end()
-        while position < len(source) and depth:
-            if source[position] == "{":
+        length = len(source)
+        while position < length and depth:
+            next_open = source.find("{", position)
+            next_close = source.find("}", position)
+            if next_close == -1:
+                break
+            if next_open != -1 and next_open < next_close:
                 depth += 1
-            elif source[position] == "}":
+                position = next_open + 1
+            else:
                 depth -= 1
-            position += 1
+                position = next_close + 1
         if depth:
             continue
 
-        start_line = source.count("\n", 0, match.start())
-        end_line = source.count("\n", 0, position)
+        start_line = line_before
+        end_line = line_before + source.count("\n", match.start(), position)
         # Extractors differ on zero- versus one-based line locations, so
         # accept either representation at this internal compatibility layer.
         if start_line <= line_start <= end_line or start_line <= line_start - 1 <= end_line:
@@ -424,33 +461,58 @@ def _split_tokens(path: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Tier-based resolution
-# ---------------------------------------------------------------------------
-
-
 def _receiver_type_for_edge(
     graph: Graph,
     src_id: NodeId,
     edge: Edge,
     caller_impl_ctx: dict[NodeId, str],
+    cache: dict[tuple[int, str], str | None] | None = None,
+    let_maps: dict[int, dict[str, str]] | None = None,
 ) -> str | None:
-    """Normalize language-specific receiver evidence for native resolution."""
+    """Normalize language-specific receiver evidence for native resolution.
+
+    ``cache`` memoizes the (caller, receiver) → type mapping for one
+    resolution pass: every method call on the same object re-asks the same
+    regex scans over the full file source, and the answer only depends on
+    the caller node and the receiver name.  ``let_maps`` precomputes the
+    per-file let-binding map once per caller instead of rescanning the
+    source for every distinct receiver.
+    """
     receiver_name = edge.properties.get("call_receiver")
     if not isinstance(receiver_name, str):
         return None
+    key: tuple[int, str] | None = None
+    if cache is not None:
+        key = (src_id.value, receiver_name)
+        cached = cache.get(key)
+        if cached is not None or key in cache:
+            return cached
+
     src_node = graph.node(src_id)
     source = (src_node.source_text if src_node else "") or ""
     if receiver_name == "self" or receiver_name.startswith("self."):
-        return caller_impl_ctx.get(src_id) or _infer_impl_type_from_source(
+        result = caller_impl_ctx.get(src_id) or _infer_impl_type_from_source(
             source,
             src_node.line_start if src_node else None,
         )
-    return (
-        _infer_type_from_receiver_expression(receiver_name)
-        or _infer_type_from_annotations(source, receiver_name)
-        or _infer_type_from_let_bindings(source, receiver_name)
-        or _infer_type_from_var_name(receiver_name)
-    )
+    else:
+        if let_maps is not None:
+            let_map = let_maps.get(src_id.value)
+            if let_map is None:
+                let_map = _build_let_binding_map(source)
+                let_maps[src_id.value] = let_map
+            let_type: str | None = let_map.get(receiver_name)
+        else:
+            let_type = _infer_type_from_let_bindings(source, receiver_name)
+        result = (
+            _infer_type_from_receiver_expression(receiver_name)
+            or _infer_type_from_annotations(source, receiver_name)
+            or let_type
+            or _infer_type_from_var_name(receiver_name)
+        )
+    if cache is not None and key is not None:
+        cache[key] = result
+    return result
 
 
 def _resolve_call_placeholders_native(graph: Graph) -> int:
@@ -472,6 +534,8 @@ def _resolve_call_placeholders_native(graph: Graph) -> int:
         for node_id, node in graph.nodes()
     ]
     edge_records = []
+    receiver_cache: dict[tuple[int, str], str | None] = {}
+    let_maps: dict[int, dict[str, str]] = {}
     for edge_id, source, target, edge in graph.edges():
         target_node = graph.node(target)
         bare = (
@@ -481,6 +545,13 @@ def _resolve_call_placeholders_native(graph: Graph) -> int:
             else ""
         )
         scope = edge.properties.get("call_scope")
+        receiver_type = (
+            _receiver_type_for_edge(
+                graph, source, edge, caller_impl_ctx, receiver_cache, let_maps
+            )
+            if bare and edge.kind == EdgeKind.CALLS
+            else None
+        )
         edge_records.append(
             (
                 edge_id.value,
@@ -489,9 +560,7 @@ def _resolve_call_placeholders_native(graph: Graph) -> int:
                 edge.kind.value,
                 edge.confidence.value,
                 scope if isinstance(scope, str) else None,
-                _receiver_type_for_edge(graph, source, edge, caller_impl_ctx)
-                if bare and edge.kind == EdgeKind.CALLS
-                else None,
+                receiver_type,
                 should_suppress_call_placeholder(bare) if bare else False,
             )
         )
@@ -548,12 +617,18 @@ def _resolve_call_placeholders_python(graph: Graph) -> int:
     import_tokens = _build_import_tokens(graph)
     imported_symbol_modules = _build_imported_symbol_modules(graph)
     caller_impl_ctx = _build_caller_impl_context(graph)
+    receiver_cache: dict[tuple[int, str], str | None] = {}
+    let_maps: dict[int, dict[str, str]] = {}
 
-    # Track existing call edges to avoid duplicates.
+    # Track existing call edges to avoid duplicates, and count CALLS
+    # fan-in per target in the same pass (tier 7 uses the aggregate).
     existing_calls: set[tuple[int, int]] = set()
+    calls_fanin: dict[int, int] = {}
     for _, src, dst, edge in graph.edges():
-        if edge.kind == EdgeKind.CALLS and edge.confidence != Confidence.AMBIGUOUS:
-            existing_calls.add((src.value, dst.value))
+        if edge.kind == EdgeKind.CALLS:
+            if edge.confidence != Confidence.AMBIGUOUS:
+                existing_calls.add((src.value, dst.value))
+            calls_fanin[dst.value] = calls_fanin.get(dst.value, 0) + 1
 
     additions: list[tuple[int, int, str, bool]] = []  # (src, dst, tag, structural)
     stale_edges: list[EdgeId] = []  # edge IDs to remove
@@ -642,42 +717,27 @@ def _resolve_call_placeholders_python(graph: Graph) -> int:
                 continue
 
         # ── Tier 4: receiver-based ─────────────────────────────────
-        receiver_name = edge.properties.get("call_receiver")
-        if receiver_name is not None:
-            impl_type: str | None = None
-            if receiver_name == "self" or receiver_name.startswith("self."):
-                source = (src_node.source_text if src_node else "") or ""
-                impl_type = caller_impl_ctx.get(src_id) or _infer_impl_type_from_source(
-                    source,
-                    src_node.line_start if src_node else None,
-                )
-            else:
-                source = (src_node.source_text if src_node else "") or ""
-                impl_type = (
-                    _infer_type_from_receiver_expression(receiver_name)
-                    or _infer_type_from_annotations(source, receiver_name)
-                    or _infer_type_from_let_bindings(source, receiver_name)
-                    or _infer_type_from_var_name(receiver_name)
-                )
-
-            if impl_type is not None:
-                # Narrow candidates whose qualified name has impl_type
-                # right before the method name.
-                receiver_candidates: list[NodeId] = []
-                for cand in candidates:
-                    cand_node = graph.node(cand)
-                    if cand_node is None:
-                        continue
-                    qn = cand_node.qualified_name
-                    parts = qn.split("::")
-                    if len(parts) >= 2 and parts[-2] == impl_type:
-                        receiver_candidates.append(cand)
-                if len(receiver_candidates) == 1:
-                    stale_edges.append(edge_id)
-                    cand = receiver_candidates[0]
-                    if (src_id.value, cand.value) not in existing_calls:
-                        additions.append((src_id.value, cand.value, "receiver", False))
+        impl_type = _receiver_type_for_edge(
+            graph, src_id, edge, caller_impl_ctx, receiver_cache, let_maps
+        )
+        if impl_type is not None:
+            # Narrow candidates whose qualified name has impl_type
+            # right before the method name.
+            receiver_candidates: list[NodeId] = []
+            for cand in candidates:
+                cand_node = graph.node(cand)
+                if cand_node is None:
                     continue
+                qn = cand_node.qualified_name
+                parts = qn.split("::")
+                if len(parts) >= 2 and parts[-2] == impl_type:
+                    receiver_candidates.append(cand)
+            if len(receiver_candidates) == 1:
+                stale_edges.append(edge_id)
+                cand = receiver_candidates[0]
+                if (src_id.value, cand.value) not in existing_calls:
+                    additions.append((src_id.value, cand.value, "receiver", False))
+                continue
 
         # ── Tier 5: import-scoped ──────────────────────────────────
         if src_file is not None:
@@ -744,13 +804,7 @@ def _resolve_call_placeholders_python(graph: Graph) -> int:
             stale_edges.append(edge_id)
             continue
 
-        scored: list[tuple[NodeId, int]] = []
-        for cand in candidates:
-            in_calls = sum(
-                1 for _, edge in graph.in_neighbors(cand)
-                if edge.kind == EdgeKind.CALLS
-            )
-            scored.append((cand, in_calls))
+        scored = [(cand, calls_fanin.get(cand.value, 0)) for cand in candidates]
 
         max_score = max((s for _, s in scored), default=0)
         # Require: (1) at least 2 incoming calls to be considered

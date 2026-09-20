@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from graphician.core.edge import Edge, EdgeKind
-from graphician.core.graph import Graph
+from graphician.core.graph import Graph, scope_key
 from graphician.core.id import NodeId
 from graphician.core.node import Node, NodeKind
 
@@ -397,7 +397,7 @@ def _ensure_param_node(
     source_line: str,
 ) -> NodeId | None:
     """Ensure a parameter variable node exists."""
-    qn = f"param::{function_id.value}::{param_name}"
+    qn = f"param::{scope_key(graph, function_id)}::{param_name}"
     existing = graph.find_by_qname(qn)
     if existing is not None:
         return existing
@@ -405,7 +405,7 @@ def _ensure_param_node(
         kind=NodeKind.VARIABLE,
         name=param_name,
         qualified_name=qn,
-    ).with_property("function_id", str(function_id.value))
+    ).with_property("function_id", scope_key(graph, function_id))
     if source_line:
         node = node.with_source_text(source_line)
     graph.add_node(node)
@@ -418,7 +418,7 @@ def _ensure_return_node(
     source_line: str,
 ) -> NodeId | None:
     """Ensure a return value node exists."""
-    qn = f"return::{function_id.value}"
+    qn = f"return::{scope_key(graph, function_id)}"
     existing = graph.find_by_qname(qn)
     if existing is not None:
         return existing
@@ -426,7 +426,7 @@ def _ensure_return_node(
         kind=NodeKind.VARIABLE,
         name="return_value",
         qualified_name=qn,
-    ).with_property("function_id", str(function_id.value))
+    ).with_property("function_id", scope_key(graph, function_id))
     if source_line:
         node = node.with_source_text(source_line)
     graph.add_node(node)
@@ -440,7 +440,7 @@ def _ensure_var_node(
     source_line: str,
 ) -> NodeId | None:
     """Ensure a variable node exists."""
-    qn = f"var::{function_id.value}::{var_name}"
+    qn = f"var::{scope_key(graph, function_id)}::{var_name}"
     existing = graph.find_by_qname(qn)
     if existing is not None:
         return existing
@@ -448,7 +448,7 @@ def _ensure_var_node(
         kind=NodeKind.VARIABLE,
         name=var_name,
         qualified_name=qn,
-    ).with_property("function_id", str(function_id.value))
+    ).with_property("function_id", scope_key(graph, function_id))
     if source_line:
         node = node.with_source_text(source_line)
     graph.add_node(node)

@@ -736,14 +736,14 @@ class GraphStore:
 
         # Load nodes and map database IDs to in-memory IDs.
         database_to_id: dict[int, NodeId] = {}
-        rows = self._conn.execute("SELECT * FROM nodes").fetchall()
+        rows = self._conn.execute("SELECT * FROM nodes ORDER BY id").fetchall()
         for row in rows:
             node = self._row_to_node(row)
             nid = graph.add_node(node)
             database_to_id[int(row["id"])] = nid
 
         # Load edges using qname mapping
-        edge_rows = self._conn.execute("SELECT * FROM edges").fetchall()
+        edge_rows = self._conn.execute("SELECT * FROM edges ORDER BY id").fetchall()
         for row in edge_rows:
             edge = self._edge_row_to_edge(row)
             src_id = database_to_id.get(int(row["src_id"]))

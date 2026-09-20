@@ -240,9 +240,82 @@ def is_rank_noise(node: Node) -> bool:
     """Return ``True`` for nodes that inflate god-node rankings without
     representing a real symbol.
 
-    Filters file containers, synthetic flow nodes, hyperedges, and
-    unresolved call placeholders (``call::<name>``).
+    Filters file containers, synthetic flow nodes, hyperedges, unresolved
+    call placeholders (``call::<name>``), concept nodes, builtin type names,
+    method stubs, and JSON-key identifiers that carry no engineering signal.
     """
-    if node.kind in (NodeKind.FILE, NodeKind.FLOW):
+    if node.kind in (NodeKind.FILE, NodeKind.FLOW, NodeKind.HYPEREDGE):
         return True
-    return node.qualified_name.startswith("call::")
+    if node.qualified_name.startswith("call::"):
+        return True
+    if node.kind == NodeKind.CONCEPT:
+        return True
+    # Single-char or all-numeric names carry no engineering signal
+    if len(node.name) == 1 or (len(node.name) > 0 and node.name.isdigit()):
+        return True
+    # Method stubs: synthetic AST nodes like ".method_name()" or "function_name()"
+    if node.name.startswith(".") or (node.name.endswith("()") and node.kind in (NodeKind.FUNCTION, NodeKind.METHOD)):
+        return True
+    # File-level hub: node name matches the source filename (no engineering signal)
+    if node.source_uri:
+        basename = node.source_uri.rsplit("/", 1)[-1]
+        if basename and node.name == basename.rsplit(".", 1)[0]:
+            return True
+    # JSON key nodes: common keys in config/manifest files carry no signal
+    if (
+        node.source_uri
+        and node.source_uri.lower().endswith(".json")
+        and node.name in _JSON_KEY_NOISE
+    ):
+        return True
+    return node.name in _BUILTIN_NOISE
+
+
+# Python builtins, typing generics, and common framework/mock symbols that
+# frequently inflate god-node rankings without representing project abstractions.
+_BUILTIN_NOISE: frozenset[str] = frozenset({
+    # Python builtins
+    "str", "int", "float", "bool", "bytes", "bytearray", "complex",
+    "object", "list", "dict", "set", "tuple", "frozenset",
+    "range", "slice", "enumerate", "zip", "map", "filter",
+    "len", "type", "isinstance", "issubclass", "hasattr", "getattr", "setattr",
+    "super", "property", "staticmethod", "classmethod",
+    "None", "True", "False",
+    # Python typing generics
+    "Any", "Optional", "Union", "Literal",
+    "List", "Dict", "Set", "Tuple", "Callable",
+    "Type", "ClassVar", "Final", "Protocol",
+    "Counter", "defaultdict", "OrderedDict", "Deque",
+    "Path", "Pattern", "Match",
+    "Iterator", "Iterable", "Generator", "Sequence", "Mapping",
+    "Enum", "ABCMeta", "ABC",
+    "datetime", "timedelta", "date", "time",
+    # Python stdlib modules commonly imported as names
+    "os", "sys", "re", "json", "io", "abc", "typing",
+    "copy", "dataclasses", "functools", "itertools", "operator",
+    "pathlib", "collections", "math", "random",
+    # Mock / testing frameworks
+    "MagicMock", "Mock", "AsyncMock",
+    "NonCallableMock", "NonCallableMagicMock", "PropertyMock",
+    "patch", "sentinel",
+    # Common framework / platform types (Swift, etc.)
+    "Foundation", "SwiftUI", "UIKit", "AppKit", "Combine",
+    "View", "Color", "Font", "DispatchQueue",
+    "String", "Int", "Double", "Float", "Bool", "Data", "URL", "Date", "UUID",
+    "Sendable", "Codable", "Decodable", "Encodable",
+    "Equatable", "Hashable", "Identifiable", "Comparable",
+    "AnyObject", "Error", "LocalizedError",
+    "NSObject", "NSString", "NSError", "NSLock",
+})
+
+# JSON keys that appear in config/manifest files but don't represent project abstractions.
+_JSON_KEY_NOISE: frozenset[str] = frozenset({
+    "start", "end", "name", "id", "type", "properties",
+    "value", "key", "data", "items", "title", "description", "version",
+    "dependencies", "devdependencies", "peerdependencies",
+    "optionaldependencies", "bundleddependencies", "bundledependencies",
+    "scripts", "main", "exports", "import", "module",
+    "keywords", "license", "author", "contributors",
+    "engines", "os", "cpu", "platform",
+    "config", "settings", "options", "args",
+})

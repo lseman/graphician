@@ -41,7 +41,7 @@ from ...analysis.structure import (
 from ...core.graph import Graph
 from ...extraction.compiler import apply_compiler_evidence, load_compiler_evidence
 from ...extraction.jedi import enrich_jedi_calls
-from ...extraction.languages import LanguageRegistry
+from ...extraction.languages import Language, LanguageRegistry
 from ...extraction.pipeline import DOCUMENT_SUFFIXES, MANIFEST_NAMES, ExtractionPipeline
 from ...extraction.rust_analyzer import RustAnalyzerOptions, enrich_with_rust_analyzer
 from ...extraction.spring_di import resolve_spring_injections
@@ -52,6 +52,32 @@ from .response import _minimal_context
 from .response.paths import handle_paths
 
 logger = logging.getLogger(__name__)
+
+
+_LANG_FLAGS: tuple[tuple[str, Language], ...] = (
+    ("python", Language.PYTHON),
+    ("typescript", Language.TYPESCRIPT),
+    ("javascript", Language.JAVASCRIPT),
+    ("rust", Language.RUST),
+    ("java", Language.JAVA),
+    ("cpp", Language.CPP),
+    ("go", Language.GO),
+)
+
+
+def _add_language_flags(p: argparse.ArgumentParser) -> None:
+    """Add per-language extraction flags; selecting any limits extraction to those."""
+    for flag, _lang in _LANG_FLAGS:
+        p.add_argument(
+            f"--{flag}",
+            action="store_true",
+            help=f"extract {flag} (selecting any language flag limits extraction to the selected ones)",
+        )
+
+
+def _registry_from_args(args: argparse.Namespace) -> LanguageRegistry:
+    selected = {lang for flag, lang in _LANG_FLAGS if getattr(args, flag, False)}
+    return LanguageRegistry(frozenset(selected) if selected else None)
 
 
 def main() -> None:
@@ -69,10 +95,18 @@ def main() -> None:
     # build
     build_p = subparsers.add_parser("build", help="Build graph from a project")
     build_p.add_argument("path", nargs="?", default=".", help="Project root")
+    _add_language_flags(build_p)
 
     # update
     update_p = subparsers.add_parser("update", help="Incrementally update graph")
     update_p.add_argument("path", nargs="?", default=".", help="Project root")
+    _add_language_flags(update_p)
+
+    # rebuild — drain pending queue and update
+    rebuild_p = subparsers.add_parser("rebuild", help="Drain pending hook changes and update graph")
+    rebuild_p.add_argument("path", nargs="?", default=".", help="Project root")
+    _add_language_flags(rebuild_p)
+
 
     # status
     subparsers.add_parser("status", help="Graph statistics")
@@ -338,6 +372,7 @@ def main() -> None:
     commands = {
         "build": cmd_build,
         "update": cmd_update,
+        "rebuild": cmd_rebuild,
         "status": cmd_status,
         "coverage": cmd_coverage,
         "rust-analyzer-enrich": cmd_rust_analyzer_enrich,
@@ -413,7 +448,7 @@ def cmd_build(args: argparse.Namespace) -> None:
 
     if has_graph and has_file_hashes:
         # Compute current file hashes
-        registry = LanguageRegistry()
+        registry = _registry_from_args(args)
         pipeline = ExtractionPipeline(registry, strict=True)
         files = pipeline.discover_files(root)
         current_hashes: dict[str, str] = {}
@@ -442,7 +477,7 @@ def cmd_build(args: argparse.Namespace) -> None:
 
         if can_incremental:
             print(f"Incremental update: {len(changed)} changed, {len(deleted)} deleted files", file=sys.stderr)
-            registry = LanguageRegistry()
+            registry = _registry_from_args(args)
             pipeline = ExtractionPipeline(registry, strict=True)
             existing = store.load_graph()
             previous_revision = store.get_metadata("indexed_commit") or store.get_metadata("last_updated")
@@ -483,7 +518,7 @@ def cmd_build_full(args: argparse.Namespace) -> None:
     """Full graph build from a project root."""
     root = Path(args.path).resolve()
     store = _load_store(args)
-    registry = LanguageRegistry()
+    registry = _registry_from_args(args)
     pipeline = ExtractionPipeline(registry, strict=True)
 
     print(f"Building graph from {root}...", file=sys.stderr)
@@ -517,7 +552,7 @@ def cmd_update(args: argparse.Namespace) -> None:
     root = Path(args.path).resolve()
     store = _load_store(args)
 
-    registry = LanguageRegistry()
+    registry = _registry_from_args(args)
     pipeline = ExtractionPipeline(registry, strict=True)
 
     # Get current file hashes
@@ -551,10 +586,75 @@ def cmd_update(args: argparse.Namespace) -> None:
     if commit is not None:
         _stamp_valid_from(graph, commit)
     store.save_graph_incremental(graph, pipeline._file_hashes or current_hashes)
-    store.set_metadata("repository_root", str(root))
-    if commit is not None:
-        store.set_metadata("indexed_commit", commit)
-    print(f"Updated: {graph.node_count()} nodes, {graph.edge_count()} edges", file=sys.stderr)
+
+
+def cmd_rebuild(args: argparse.Namespace) -> None:
+    """Drain pending hook changes and incrementally update graph."""
+    root = Path(args.path).resolve()
+    out_dir = root / ".graphician"
+    store = _load_store(args)
+
+    registry = _registry_from_args(args)
+    pipeline = ExtractionPipeline(registry, strict=True)
+
+    # Drain pending changes from hook queue.
+    from .rebuild import drain_pending_changes
+    pending = drain_pending_changes(out_dir)
+    if pending:
+        logger.info("drained %d pending change(s) from hook queue", len(pending))
+
+    # Discover current files and detect changes.
+    files = pipeline.discover_files(root)
+    current_hashes: dict[str, str] = {}
+    for f in files:
+        try:
+            content = f.read_bytes()
+            current_hashes[str(f.relative_to(root))] = hashlib.sha256(content).hexdigest()
+        except OSError:
+            pass
+
+    changed: list[str] = []
+    deleted: list[str] = []
+    stored_hashes = store.get_file_hashes()
+
+    for path_str, new_hash in current_hashes.items():
+        if stored_hashes.get(path_str) != new_hash:
+            changed.append(path_str)
+    for path_str in stored_hashes:
+        if path_str not in current_hashes:
+            deleted.append(path_str)
+
+    # Merge pending queue paths.
+    for p in pending:
+        try:
+            rel_str = str(p.relative_to(root))
+        except ValueError:
+            rel_str = os.fspath(p)
+        if rel_str not in changed:
+            changed.append(rel_str)
+
+    if not changed and not deleted:
+        print("No changes detected.", file=sys.stderr)
+        store.close()
+        return
+
+    existing = store.load_graph()
+    graph = pipeline.update(root, existing, changed, deleted)
+    store.save_graph(graph, pipeline._file_hashes or current_hashes)
+
+    # Stamp git HEAD for provenance.
+    from .rebuild import get_git_head
+    head = get_git_head(root)
+    if head:
+        store.set_metadata("git_head", head)
+
+    logger.info(
+        "rebuild: %d nodes, %d edges (changed=%d, deleted=%d)",
+        graph.node_count(),
+        graph.edge_count(),
+        len(changed),
+        len(deleted),
+    )
     store.close()
 
 

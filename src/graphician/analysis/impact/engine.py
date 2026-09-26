@@ -9,6 +9,8 @@ from ...core.edge import EdgeKind
 from ...core.graph import Graph
 from ...core.id import NodeId
 from ...core.node import Node, NodeKind
+from ..paths import _IMPACT_EDGE_COST as _IMPACT_EDGE_COST_MAP
+from ..paths import _NODE_KIND_BOOST as _NODE_KIND_BOOST_MAP
 from .types import ImpactHit, ImpactQuery
 
 
@@ -100,41 +102,25 @@ def find_impact(graph: Graph, query: ImpactQuery) -> list[ImpactHit]:
     return hits[:query.limit]
 
 
+_FORWARD_IMPACT_COST: dict[EdgeKind, float] = {
+    EdgeKind.CALLS: 2.25,
+    EdgeKind.IMPORTS: 2.5,
+    EdgeKind.DEPENDS_ON: 2.5,
+    EdgeKind.INHERITS: 1.75,
+    EdgeKind.IMPLEMENTS: 1.75,
+    EdgeKind.DATA_FLOW: 2.0,
+    EdgeKind.READS_WRITES: 2.0,
+}
+
+
 def _impact_cost(edge: Any) -> float:
     """Cost to traverse an edge in reverse impact walk."""
-    base = {
-        EdgeKind.CALLS: 1.0,
-        EdgeKind.DEFINES: 1.25,
-        EdgeKind.IMPORTS: 1.6,
-        EdgeKind.DEPENDS_ON: 1.6,
-        EdgeKind.INHERITS: 0.75,
-        EdgeKind.IMPLEMENTS: 0.75,
-        EdgeKind.DATA_FLOW: 0.8,
-        EdgeKind.READS_WRITES: 0.9,
-        EdgeKind.TESTED_BY: 1.1,
-        EdgeKind.MEMBER_OF: 5.0,
-        EdgeKind.ENTRY_OF: 5.0,
-        EdgeKind.DESCRIBES: 1.2,
-        EdgeKind.DOCUMENTED_BY: 1.2,
-        EdgeKind.MENTIONS: 1.8,
-        EdgeKind.ILLUSTRATES: 1.8,
-        EdgeKind.SIMILAR_TO: 2.0,
-        EdgeKind.RATIONALE_FOR: 2.0,
-    }.get(edge.kind, 1.5)
-    return base / max(edge.confidence.score(), 0.05)
+    return _IMPACT_EDGE_COST_MAP.get(edge.kind, 1.5) / max(edge.confidence.score(), 0.05)
 
 
 def _forward_impact_cost(edge: Any) -> float | None:
     """Cost for conservative forward traversal from a changed symbol."""
-    base = {
-        EdgeKind.CALLS: 2.25,
-        EdgeKind.IMPORTS: 2.5,
-        EdgeKind.DEPENDS_ON: 2.5,
-        EdgeKind.INHERITS: 1.75,
-        EdgeKind.IMPLEMENTS: 1.75,
-        EdgeKind.DATA_FLOW: 2.0,
-        EdgeKind.READS_WRITES: 2.0,
-    }.get(edge.kind)
+    base = _FORWARD_IMPACT_COST.get(edge.kind)
     if base is None:
         return None
     return base / max(edge.confidence.score(), 0.05)
@@ -142,27 +128,7 @@ def _forward_impact_cost(edge: Any) -> float | None:
 
 def _node_kind_boost(kind: NodeKind) -> float:
     """Impact ranking boost for node kinds."""
-    return {
-        NodeKind.FUNCTION: 1.3,
-        NodeKind.METHOD: 1.3,
-        NodeKind.CLASS: 1.3,
-        NodeKind.TYPE: 1.3,
-        NodeKind.TRAIT: 1.2,
-        NodeKind.IMPL: 1.2,
-        NodeKind.FILE: 0.95,
-        NodeKind.MODULE: 0.95,
-        NodeKind.DOCUMENT: 0.85,
-        NodeKind.SECTION: 0.85,
-        NodeKind.CONCEPT: 0.85,
-        NodeKind.DIAGRAM: 0.75,
-        NodeKind.IMAGE: 0.75,
-        NodeKind.VARIABLE: 0.7,
-        NodeKind.COMMIT: 0.7,
-        NodeKind.AUTHOR: 0.7,
-        NodeKind.HYPEREDGE: 0.7,
-        NodeKind.FLOW: 0.4,
-        NodeKind.PACKAGE: 0.95,
-    }.get(kind, 0.8)
+    return _NODE_KIND_BOOST_MAP.get(kind, 0.8)
 
 
 def _compute_score(node: Node, nid: NodeId, cost: float, distance: int) -> float:

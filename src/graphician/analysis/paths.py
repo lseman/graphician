@@ -22,16 +22,13 @@ Optimized versions use numpy for batch operations.
 
 from __future__ import annotations
 
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import dataclass, field
-
-import numpy as np
 
 from ..core.edge import EdgeKind
 from ..core.graph import Graph
 from ..core.id import NodeId
 from ..core.node import NodeKind
-from .adjacency import AdjacencyConfig
 
 
 @dataclass
@@ -58,77 +55,82 @@ class WeightedPath:
 
 # ── Edge kind weights ────────────────────────────────────────────────
 
+_PATH_EDGE_COST: dict[EdgeKind, float] = {
+    EdgeKind.DEFINES: 0.35,
+    EdgeKind.CALLS: 1.0,
+    EdgeKind.IMPORTS: 1.35,
+    EdgeKind.DEPENDS_ON: 1.35,
+    EdgeKind.INHERITS: 0.8,
+    EdgeKind.IMPLEMENTS: 0.8,
+    EdgeKind.DATA_FLOW: 0.5,
+    EdgeKind.READS_WRITES: 0.9,
+    EdgeKind.TESTED_BY: 1.8,
+    EdgeKind.MEMBER_OF: 3.0,
+    EdgeKind.ENTRY_OF: 3.0,
+    EdgeKind.DESCRIBES: 1.1,
+    EdgeKind.DOCUMENTED_BY: 1.1,
+    EdgeKind.MENTIONS: 1.7,
+    EdgeKind.ILLUSTRATES: 1.7,
+    EdgeKind.SIMILAR_TO: 2.0,
+    EdgeKind.RATIONALE_FOR: 2.0,
+}
+
+_IMPACT_EDGE_COST: dict[EdgeKind, float] = {
+    EdgeKind.CALLS: 1.0,
+    EdgeKind.DEFINES: 1.25,
+    EdgeKind.IMPORTS: 1.6,
+    EdgeKind.DEPENDS_ON: 1.6,
+    EdgeKind.INHERITS: 0.75,
+    EdgeKind.IMPLEMENTS: 0.75,
+    EdgeKind.DATA_FLOW: 0.8,
+    EdgeKind.READS_WRITES: 0.9,
+    EdgeKind.TESTED_BY: 1.1,
+    EdgeKind.MEMBER_OF: 5.0,
+    EdgeKind.ENTRY_OF: 5.0,
+    EdgeKind.DESCRIBES: 1.2,
+    EdgeKind.DOCUMENTED_BY: 1.2,
+    EdgeKind.MENTIONS: 1.8,
+    EdgeKind.ILLUSTRATES: 1.8,
+    EdgeKind.SIMILAR_TO: 2.0,
+    EdgeKind.RATIONALE_FOR: 2.0,
+}
+
+_NODE_KIND_BOOST: dict[NodeKind, float] = {
+    NodeKind.FUNCTION: 1.3,
+    NodeKind.METHOD: 1.3,
+    NodeKind.CLASS: 1.3,
+    NodeKind.TYPE: 1.3,
+    NodeKind.TRAIT: 1.2,
+    NodeKind.IMPL: 1.2,
+    NodeKind.FILE: 0.95,
+    NodeKind.MODULE: 0.95,
+    NodeKind.DOCUMENT: 0.85,
+    NodeKind.SECTION: 0.85,
+    NodeKind.CONCEPT: 0.85,
+    NodeKind.DIAGRAM: 0.75,
+    NodeKind.IMAGE: 0.75,
+    NodeKind.VARIABLE: 0.7,
+    NodeKind.COMMIT: 0.7,
+    NodeKind.AUTHOR: 0.7,
+    NodeKind.HYPEREDGE: 0.7,
+    NodeKind.FLOW: 0.4,
+    NodeKind.PACKAGE: 0.95,
+}
+
+
 def _path_edge_cost(kind: EdgeKind, confidence: float) -> float:
     """Cost to traverse an edge (lower = more preferred for top paths)."""
-    base = {
-        EdgeKind.DEFINES: 0.35,
-        EdgeKind.CALLS: 1.0,
-        EdgeKind.IMPORTS: 1.35,
-        EdgeKind.DEPENDS_ON: 1.35,
-        EdgeKind.INHERITS: 0.8,
-        EdgeKind.IMPLEMENTS: 0.8,
-        EdgeKind.DATA_FLOW: 0.5,
-        EdgeKind.READS_WRITES: 0.9,
-        EdgeKind.TESTED_BY: 1.8,
-        EdgeKind.MEMBER_OF: 3.0,
-        EdgeKind.ENTRY_OF: 3.0,
-        EdgeKind.DESCRIBES: 1.1,
-        EdgeKind.DOCUMENTED_BY: 1.1,
-        EdgeKind.MENTIONS: 1.7,
-        EdgeKind.ILLUSTRATES: 1.7,
-        EdgeKind.SIMILAR_TO: 2.0,
-        EdgeKind.RATIONALE_FOR: 2.0,
-    }.get(kind, 1.5)
-    return base / max(confidence, 0.05)
+    return _PATH_EDGE_COST.get(kind, 1.5) / max(confidence, 0.05)
 
 
 def _impact_edge_cost(kind: EdgeKind, confidence: float) -> float:
     """Cost for impact analysis (higher = more cost to traverse)."""
-    base = {
-        EdgeKind.CALLS: 1.0,
-        EdgeKind.DEFINES: 1.25,
-        EdgeKind.IMPORTS: 1.6,
-        EdgeKind.DEPENDS_ON: 1.6,
-        EdgeKind.INHERITS: 0.75,
-        EdgeKind.IMPLEMENTS: 0.75,
-        EdgeKind.DATA_FLOW: 0.8,
-        EdgeKind.READS_WRITES: 0.9,
-        EdgeKind.TESTED_BY: 1.1,
-        EdgeKind.MEMBER_OF: 5.0,
-        EdgeKind.ENTRY_OF: 5.0,
-        EdgeKind.DESCRIBES: 1.2,
-        EdgeKind.DOCUMENTED_BY: 1.2,
-        EdgeKind.MENTIONS: 1.8,
-        EdgeKind.ILLUSTRATES: 1.8,
-        EdgeKind.SIMILAR_TO: 2.0,
-        EdgeKind.RATIONALE_FOR: 2.0,
-    }.get(kind, 1.5)
-    return base / max(confidence, 0.05)
+    return _IMPACT_EDGE_COST.get(kind, 1.5) / max(confidence, 0.05)
 
 
 def _node_kind_boost(kind: NodeKind) -> float:
     """Impact ranking boost for node kinds."""
-    return {
-        NodeKind.FUNCTION: 1.3,
-        NodeKind.METHOD: 1.3,
-        NodeKind.CLASS: 1.3,
-        NodeKind.TYPE: 1.3,
-        NodeKind.TRAIT: 1.2,
-        NodeKind.IMPL: 1.2,
-        NodeKind.FILE: 0.95,
-        NodeKind.MODULE: 0.95,
-        NodeKind.DOCUMENT: 0.85,
-        NodeKind.SECTION: 0.85,
-        NodeKind.CONCEPT: 0.85,
-        NodeKind.DIAGRAM: 0.75,
-        NodeKind.IMAGE: 0.75,
-        NodeKind.VARIABLE: 0.7,
-        NodeKind.COMMIT: 0.7,
-        NodeKind.AUTHOR: 0.7,
-        NodeKind.HYPEREDGE: 0.7,
-        NodeKind.FLOW: 0.4,
-        NodeKind.PACKAGE: 0.95,
-    }.get(kind, 0.8)
+    return _NODE_KIND_BOOST.get(kind, 0.8)
 
 
 # ── Path enumeration ─────────────────────────────────────────────────
@@ -408,72 +410,28 @@ def _traverse(
 ) -> list[NodeId]:
     """BFS following edges of a specific kind.
 
-    Uses optimized array-based BFS when possible.
+    Uses the graph's adjacency lists directly — no full-edge iteration.
     """
-    # Build filtered adjacency for the specific edge kind
-    AdjacencyConfig(
-        min_confidence=0.0,
-        exclude_ambiguous=False,
-    )
-
-    # Collect filtered edges
-    edge_set: set[tuple[int, int]] = set()
-    for _, src, dst, edge in graph.edges():
-        if edge.kind == edge_kind and edge.confidence.score() >= 0.0:
-            edge_set.add((src.value, dst.value))
-
-    all_nodes: list[int] = [nid.value for nid, _ in graph.nodes()]
-    n = len(all_nodes)
-    node_to_idx: dict[int, int] = {v: i for i, v in enumerate(all_nodes)}
-
-    # Build adjacency map
-    adj_map: dict[int, set[int]] = defaultdict(set)
-    for u, v in edge_set:
-        u_idx = node_to_idx.get(u)
-        v_idx = node_to_idx.get(v)
-        if u_idx is not None and v_idx is not None:
-            adj_map[u_idx].add(v_idx)
-
-    # Convert start node to index
-    start_idx = node_to_idx.get(start.value)
-    if start_idx is None:
-        return []
-
-    # Optimized BFS using numpy arrays
-    visited = np.zeros(n, dtype=np.bool_)
-    visited[start_idx] = True
-
-    # BFS queue as numpy arrays for speed
-    queue = np.zeros((max_hops + 1, n), dtype=np.intp)  # [depth][node]
-    queue_counts = np.zeros(max_hops + 1, dtype=np.intp)
-    queue_counts[0] = 1
-    queue[0, 0] = start_idx
-
+    visited: set[int] = {start.value}
     results: list[NodeId] = []
+    queue: list[tuple[int, int]] = [(start.value, 0)]
+    head = 0
 
-    for depth in range(max_hops + 1):
-        count = queue_counts[depth]
-        if count == 0:
-            break
-
-        for i in range(count):
-            node = queue[depth, i]
-
-            # Get neighbors
-            neighbors = sorted(adj_map.get(node, set()))
-
-            for neighbor in neighbors:
-                if not visited[neighbor]:
-                    visited[neighbor] = True
-                    results.append(NodeId(all_nodes[neighbor]))
-                    if depth + 1 <= max_hops:
-                        queue[depth + 1, queue_counts[depth + 1]] = neighbor
-                        queue_counts[depth + 1] += 1
+    while head < len(queue):
+        nid, depth = queue[head]
+        head += 1
+        if depth >= max_hops:
+            continue
+        for neighbor, _ in graph.out_neighbors(NodeId(nid)):
+            nval = neighbor.value if isinstance(neighbor, NodeId) else neighbor
+            if nval in visited:
+                continue
+            visited.add(nval)
+            results.append(NodeId(nval))
+            queue.append((nval, depth + 1))
 
     return results
 
-
-# ── Optimized BFS with numpy ─────────────────────────────────────────
 
 def _bfs_optimized(
     graph: Graph,
@@ -482,73 +440,30 @@ def _bfs_optimized(
     max_hops: int = 20,
     filter_confidence: float = 0.0,
 ) -> list[NodeId]:
-    """Optimized BFS traversal using numpy arrays.
+    """Optimized BFS traversal using the graph's adjacency lists.
 
-    Args:
-        graph: The code graph.
-        start: Starting node.
-        edge_kind: Filter by edge kind (None for all edges).
-        max_hops: Maximum depth to traverse.
-        filter_confidence: Minimum edge confidence.
-
-    Returns:
-        List of visited node IDs.
+    No full-edge iteration — walks directly from the start node.
     """
-    # Build filtered adjacency
-    edge_set: set[tuple[int, int]] = set()
-    for _, src, dst, edge in graph.edges():
-        if edge.confidence.score() < filter_confidence:
-            continue
-        if edge_kind is not None and edge.kind != edge_kind:
-            continue
-        edge_set.add((src.value, dst.value))
-
-    all_nodes: list[int] = [nid.value for nid, _ in graph.nodes()]
-    n = len(all_nodes)
-    node_to_idx: dict[int, int] = {v: i for i, v in enumerate(all_nodes)}
-
-    # Build adjacency map
-    adj_map: dict[int, list[int]] = defaultdict(list)
-    for u, v in edge_set:
-        u_idx = node_to_idx.get(u)
-        v_idx = node_to_idx.get(v)
-        if u_idx is not None and v_idx is not None:
-            adj_map[u_idx].append(v_idx)
-
-    # Convert start node to index
-    start_idx = node_to_idx.get(start.value)
-    if start_idx is None:
-        return []
-
-    # Optimized BFS using numpy arrays
-    visited = np.zeros(n, dtype=np.bool_)
-    visited[start_idx] = True
-
-    # BFS queue as numpy arrays for speed
-    queue = np.zeros((max_hops + 1, n), dtype=np.intp)
-    queue_counts = np.zeros(max_hops + 1, dtype=np.intp)
-    queue_counts[0] = 1
-    queue[0, 0] = start_idx
-
+    visited: set[int] = {start.value}
     results: list[NodeId] = []
+    queue: list[tuple[int, int]] = [(start.value, 0)]
+    head = 0
 
-    for depth in range(max_hops + 1):
-        count = queue_counts[depth]
-        if count == 0:
-            break
-
-        for i in range(count):
-            node = queue[depth, i]
-
-            # Get neighbors
-            neighbors = adj_map.get(node, [])
-
-            for neighbor in neighbors:
-                if not visited[neighbor]:
-                    visited[neighbor] = True
-                    results.append(NodeId(all_nodes[neighbor]))
-                    if depth + 1 <= max_hops:
-                        queue[depth + 1, queue_counts[depth + 1]] = neighbor
-                        queue_counts[depth + 1] += 1
+    while head < len(queue):
+        nid, depth = queue[head]
+        head += 1
+        if depth >= max_hops:
+            continue
+        for neighbor, edge in graph.out_neighbors(NodeId(nid)):
+            if edge.confidence.score() < filter_confidence:
+                continue
+            if edge_kind is not None and edge.kind != edge_kind:
+                continue
+            nval = neighbor.value if isinstance(neighbor, NodeId) else neighbor
+            if nval in visited:
+                continue
+            visited.add(nval)
+            results.append(NodeId(nval))
+            queue.append((nval, depth + 1))
 
     return results

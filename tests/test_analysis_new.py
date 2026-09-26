@@ -137,7 +137,7 @@ class TestFindTopPaths:
 
         assert len(paths) == 1
         assert paths[0].nodes == [start, helper, target]
-        assert paths[0].cost == 0.7
+        assert abs(paths[0].cost - 0.7) < 1e-6
 
 
 # ── Impact ───────────────────────────────────────────────────────────

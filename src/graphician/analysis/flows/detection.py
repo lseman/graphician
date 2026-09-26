@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..._extract import HAS_RUST
 from ...core.edge import Edge, EdgeKind
 from ...core.id import NodeId
 from ...core.node import Node, NodeKind
@@ -20,56 +21,98 @@ def compute_flows_with_options(
     """
     opts = options or FlowOptions()
     entries = _detect_entry_points(graph)
+    if not entries:
+        return 0
+
+    # Batch-trace all entries via native Rust if available
+    if HAS_RUST:
+        from ..native import native_graph
+
+        snapshot = native_graph(graph)
+        if snapshot is not None:
+            entry_ids = [e.value for e in entries]
+            # Collect placeholder IDs (call:: placeholder nodes act as BFS boundaries)
+            placeholder_ids = [
+                n.value for _, n in graph.nodes()
+                if n.qualified_name.startswith("call::")
+            ]
+            raw_flows = snapshot.trace_flows(
+                entry_ids,
+                placeholder_ids,
+                opts.max_depth,
+                opts.max_nodes_per_flow,
+            )
+            # Process each entry's flow result
+            for entry, members_raw in zip(entries, raw_flows):
+                if not members_raw:
+                    continue
+                # members_raw: list of (node_index, depth)
+                members = [(NodeId(snapshot.node_ids[idx]), depth) for idx, depth in members_raw]
+                _process_flow(graph, entry, members, opts)
+            return len(raw_flows)
+
+    # Fallback: trace entries one-by-one in Python
     produced = 0
-
     for entry in entries:
-        entry_node = graph.node(entry)
-        if entry_node is None:
-            continue
-
-        entry_qn = entry_node.qualified_name
-        entry_name = entry_node.name
-        is_test_entry = _is_test_node(entry_node)
-
         members = _trace_flow(graph, entry, opts)
         if len(members) < opts.min_flow_size:
             continue
-
-        member_count = len(members)
-        depth_reached = max((d for _, d in members), default=0)
-        criticality = _compute_criticality(graph, members, entry_name, is_test_entry)
-
-        # Identity: flow:: prefix + entry qname. Stable across re-runs.
-        flow_qn = f"flow::{entry_qn}"
-        flow_node = (
-            Node.new(NodeKind.FLOW, flow_qn)
-            .with_property("entry_qualified_name", entry_qn)
-            .with_property("entry_name", entry_name)
-            .with_property("depth", depth_reached)
-            .with_property("node_count", member_count)
-            .with_property("criticality", round(criticality, 4))
-            .with_property("is_test_flow", is_test_entry)
-        )
-        flow_id = graph.add_node(flow_node)
-
-        # Idempotency: prune old MemberOf / EntryOf edges into this flow.
-        existing: set[tuple[NodeId, EdgeKind]] = set()
-        for src, edge in graph.in_neighbors(flow_id):
-            if edge.kind in (EdgeKind.MEMBER_OF, EdgeKind.ENTRY_OF):
-                existing.add((src, edge.kind))
-
-        if (entry, EdgeKind.ENTRY_OF) not in existing:
-            graph.add_edge(entry, flow_id, Edge.extracted(EdgeKind.ENTRY_OF))
-
-        for member, _depth in members:
-            if member == entry:
-                continue
-            if (member, EdgeKind.MEMBER_OF) not in existing:
-                graph.add_edge(member, flow_id, Edge.extracted(EdgeKind.MEMBER_OF))
-
+        _process_flow(graph, entry, members, opts)
         produced += 1
 
     return produced
+
+
+def _process_flow(
+    graph,
+    entry: NodeId,
+    members: list[tuple[NodeId, int]],
+    opts: FlowOptions,
+) -> None:
+    """Create a Flow node and its MemberOf/EntryOf edges."""
+    entry_node = graph.node(entry)
+    if entry_node is None:
+        return
+
+    entry_qn = entry_node.qualified_name
+    entry_name = entry_node.name
+    is_test_entry = _is_test_node(entry_node)
+
+    if len(members) < opts.min_flow_size:
+        return
+
+    member_count = len(members)
+    depth_reached = max((d for _, d in members), default=0)
+    criticality = _compute_criticality(graph, members, entry_name, is_test_entry)
+
+    # Identity: flow:: prefix + entry qname. Stable across re-runs.
+    flow_qn = f"flow::{entry_qn}"
+    flow_node = (
+        Node.new(NodeKind.FLOW, flow_qn)
+        .with_property("entry_qualified_name", entry_qn)
+        .with_property("entry_name", entry_name)
+        .with_property("depth", depth_reached)
+        .with_property("node_count", member_count)
+        .with_property("criticality", round(criticality, 4))
+        .with_property("is_test_flow", is_test_entry)
+    )
+    flow_id = graph.add_node(flow_node)
+
+    # Idempotency: prune old MemberOf / EntryOf edges into this flow.
+    existing: set[tuple[NodeId, EdgeKind]] = set()
+    for src, edge in graph.in_neighbors(flow_id):
+        if edge.kind in (EdgeKind.MEMBER_OF, EdgeKind.ENTRY_OF):
+            existing.add((src, edge.kind))
+
+    if (entry, EdgeKind.ENTRY_OF) not in existing:
+        graph.add_edge(entry, flow_id, Edge.extracted(EdgeKind.ENTRY_OF))
+
+    for member, _depth in members:
+        if member == entry:
+            continue
+        if (member, EdgeKind.MEMBER_OF) not in existing:
+            graph.add_edge(member, flow_id, Edge.extracted(EdgeKind.MEMBER_OF))
+
 
 
 def _detect_entry_points(graph) -> list[NodeId]:

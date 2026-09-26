@@ -193,6 +193,34 @@ def find_top_paths(
     the function terminates quickly even on dense graphs where the
     number of simple paths is exponential.
     """
+    from .native import native_graph
+
+    snapshot = native_graph(graph)
+    if snapshot is not None:
+        edge_kinds = [k.value for k in q.edge_kinds] if q.edge_kinds else None
+        target_id = q.to_id.value if q.to_id is not None else None
+        raw = snapshot.top_paths(
+            q.from_id.value,
+            target_id,
+            q.max_hops,
+            edge_kinds,
+            q.min_confidence,
+            limit,
+            expansion_budget,
+        )
+        results: list[WeightedPath] = []
+        for node_ids, cost, edge_info in raw:
+            edges: list[tuple[EdgeKind, float]] = [
+                (EdgeKind(e), c) for e, c in edge_info
+            ]
+            results.append(WeightedPath(
+                nodes=[NodeId(nid) for nid in node_ids],
+                cost=float(cost),
+                edges=edges,
+            ))
+        return results
+
+    # Fallback: Python implementation (original logic)
     if limit <= 0:
         return []
 

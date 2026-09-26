@@ -10,19 +10,43 @@ Usage:
 
 from __future__ import annotations
 
+import sys
 from importlib.machinery import EXTENSION_SUFFIXES
 from pathlib import Path
 
-# Try to load the compiled Rust extension
-_module_dir = Path(__file__).parent
-_lib_path = next(
-    (
-        _module_dir / f"graphician_native{suffix}"
-        for suffix in EXTENSION_SUFFIXES
-        if (_module_dir / f"graphician_native{suffix}").exists()
-    ),
-    None,
-)
+# Prefer the installed copy from virtualenv site-packages (maturin develop)
+_lib_path = None
+
+# Check sys.path for installed site-packages (handles virtualenv)
+for p in sys.path:
+    candidate = Path(p) / "graphician_native" / "graphician_native.abi3.so"
+    if candidate.exists():
+        _lib_path = candidate
+        break
+
+# Also check site.getsitepackages() for system Python installs
+if _lib_path is None:
+    try:
+        import site
+        for sitedir in site.getsitepackages():
+            candidate = Path(sitedir) / "graphician_native" / "graphician_native.abi3.so"
+            if candidate.exists():
+                _lib_path = candidate
+                break
+    except (ImportError, ValueError):
+        pass
+
+# Fallback to local .so in this package directory
+if _lib_path is None:
+    _module_dir = Path(__file__).parent
+    _lib_path = next(
+        (
+            _module_dir / f"graphician_native{suffix}"
+            for suffix in EXTENSION_SUFFIXES
+            if (_module_dir / f"graphician_native{suffix}").exists()
+        ),
+        None,
+    )
 
 if _lib_path is not None:
     import importlib.util
@@ -54,6 +78,8 @@ if _lib_path is not None:
     community_detection_infomap_from_native = getattr(_mod, "community_detection_infomap_from_native", None)
     dedup_candidate_pairs = _mod.dedup_candidate_pairs
     fuzzy_score_matrix = _mod.fuzzy_score_matrix
+    build_trigram_index = _mod.build_trigram_index
+    trigram_candidates = _mod.trigram_candidates
     plan_type_resolution = getattr(_mod, "plan_type_resolution", None)
     plan_call_resolution = getattr(_mod, "plan_call_resolution", None)
     save_graph_sqlite = getattr(_mod, "save_graph_sqlite", None)
@@ -78,6 +104,8 @@ else:
     community_detection_infomap = None
     dedup_candidate_pairs = None
     fuzzy_score_matrix = None
+    build_trigram_index = None
+    trigram_candidates = None
     plan_type_resolution = None
     plan_call_resolution = None
     save_graph_sqlite = None
@@ -97,6 +125,7 @@ __all__ = [
     "CommunityOptions",
     "NativeGraph",
     "available",
+    "build_trigram_index",
     "community_detection_infomap",
     "community_detection_infomap_from_native",
     "community_detection_leiden",
@@ -119,5 +148,6 @@ __all__ = [
     "plan_type_resolution",
     "save_graph_incremental_sqlite",
     "save_graph_sqlite",
+    "trigram_candidates",
     "version",
 ]

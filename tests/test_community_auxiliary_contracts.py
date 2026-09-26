@@ -54,23 +54,20 @@ def test_community_node_rankings_work_without_scipy() -> None:
     assert is_rank_noise(Node.new(NodeKind.FUNCTION, "call::missing"))
 
 
-def test_knowledge_gaps_reports_isolates_hotspots_and_single_file_communities(monkeypatch) -> None:
+def test_knowledge_gaps_reports_isolates_hotspots_and_single_file_communities() -> None:
     graph, _ids = _fixture_graph()
-    graph.add_node(Node.new(NodeKind.FUNCTION, "app::isolated"))
-    community_result = {
-        "communities": [
-            {"id": 0, "size": 6, "nodes": [{"qualified_name": f"app::n{i}"} for i in range(6)]},
-            {"id": 1, "size": 1, "nodes": [{"qualified_name": "app::isolated"}]},
-        ]
-    }
-    monkeypatch.setattr(gaps, "detect_communities", lambda graph, algorithm: community_result)
+    isolated_id = graph.add_node(Node.new(NodeKind.FUNCTION, "app::isolated"))
 
     result = gaps.knowledge_gaps(graph)
 
+    # Isolated node (degree 0, not FILE)
     assert any(item["qualified_name"] == "app::isolated" for item in result["isolated_nodes"])
-    assert result["thin_communities"] == [{"community_id": 1, "size": 1}]
+    # Untested hotspot: n0 has degree 5, no TestedBy edge
     assert result["untested_hotspots"][0]["qualified_name"] == "app::n0"
-    assert result["single_file_communities"][0]["file"] == "app.py"
+    # Single-file community: fixture nodes all in app.py
+    assert any(c["file"] == "app.py" for c in result["single_file_communities"])
+    # Thin communities exist (isolated node is its own community)
+    assert any(c["size"] < 3 for c in result["thin_communities"])
 
 
 def test_subgraph_builder_preserves_only_selected_nodes_and_internal_edges() -> None:

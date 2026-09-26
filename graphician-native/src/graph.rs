@@ -42,11 +42,17 @@ impl NativeGraph {
         for (source, target, kind, confidence) in edges {
             let source_index = match node_index.get(&source) {
                 Some(&i) => i,
-                None => { skipped_edges += 1; continue },
+                None => {
+                    skipped_edges += 1;
+                    continue;
+                }
             };
             let target_index = match node_index.get(&target) {
                 Some(&i) => i,
-                None => { skipped_edges += 1; continue },
+                None => {
+                    skipped_edges += 1;
+                    continue;
+                }
             };
             let ambiguous = confidence.eq_ignore_ascii_case("ambiguous");
             let confidence_weight = if confidence.eq_ignore_ascii_case("extracted") {
@@ -98,6 +104,10 @@ impl NativeGraph {
     pub fn skipped_edges(&self) -> usize {
         self.skipped_edges
     }
+    #[getter]
+    pub fn node_ids(&self) -> Vec<u64> {
+        self.node_ids.clone()
+    }
 
     #[pyo3(signature = (damping=0.85, iterations=30, seeds=None))]
     pub fn pagerank(
@@ -118,7 +128,14 @@ impl NativeGraph {
         max_hops: usize,
         min_confidence: f32,
     ) -> PyResult<Vec<u64>> {
-        crate::analysis::traversal::traverse(self, start, edge_kind, reverse, max_hops, min_confidence)
+        crate::analysis::traversal::traverse(
+            self,
+            start,
+            edge_kind,
+            reverse,
+            max_hops,
+            min_confidence,
+        )
     }
 
     #[pyo3(signature = (start, target=None, max_hops=6, edge_kinds=None, min_confidence=0.0))]
@@ -144,7 +161,28 @@ impl NativeGraph {
     pub fn max_depth(&self, start: u64, max_hops: usize) -> PyResult<usize> {
         crate::analysis::traversal::max_depth(self, start, max_hops)
     }
-
+    #[pyo3(signature = (start, target=None, max_hops=6, edge_kinds=None, min_confidence=0.0, limit=10, expansion_budget=200000))]
+    pub fn top_paths(
+        &self,
+        start: u64,
+        target: Option<u64>,
+        max_hops: usize,
+        edge_kinds: Option<Vec<String>>,
+        min_confidence: f32,
+        limit: usize,
+        expansion_budget: usize,
+    ) -> PyResult<Vec<(Vec<u64>, f64, Vec<(String, f64)>)>> {
+        crate::analysis::traversal::top_paths(
+            self,
+            start,
+            target,
+            max_hops,
+            edge_kinds,
+            min_confidence,
+            limit,
+            expansion_budget,
+        )
+    }
     pub fn cyclic_components(&self) -> Vec<Vec<u64>> {
         crate::analysis::structure::cyclic_components(self)
     }

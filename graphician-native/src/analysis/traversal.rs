@@ -115,7 +115,184 @@ pub(crate) fn max_depth(graph: &NativeGraph, start: u64, max_hops: usize) -> PyR
     }
     Ok(maximum)
 }
+// Dijkstra-style top-k path search with diversity scoring.
+// Returns weighted paths as (node_ids, cost, edge_info) tuples.
+pub(crate) fn top_paths(
+    graph: &NativeGraph,
+    start: u64,
+    target: Option<u64>,
+    max_hops: usize,
+    edge_kinds: Option<Vec<String>>,
+    min_confidence: f32,
+    limit: usize,
+    expansion_budget: usize,
+) -> PyResult<Vec<(Vec<u64>, f64, Vec<(String, f64)>)>> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
 
+    let start = start_index(graph, start)?;
+    let target = target.map(|id| start_index(graph, id)).transpose()?;
+    let allowed: Option<std::collections::HashSet<String>> =
+        edge_kinds.as_ref().map(|kinds| kinds.iter().cloned().collect());
+
+    let mut heap = BinaryHeap::from([TopPathCandidate {
+        cost: 0.0,
+        nodes: vec![start],
+    }]);
+
+    let mut chosen: Vec<(Vec<u64>, f64, Vec<(String, f64)>)> = Vec::new();
+    let mut node_expansions: HashMap<usize, usize> = HashMap::new();
+    let mut expansions = 0usize;
+
+    while (!heap.is_empty()) && (chosen.len() < limit * 3) {
+        let cand = heap.pop();
+        let cand = match cand {
+            Some(c) => c,
+            None => break,
+        };
+
+        if cand.nodes.len() - 1 > max_hops {
+            continue;
+        }
+
+        let last = *cand.nodes.last().expect("non-empty");
+
+        let should_record = cand.nodes.len() > 1
+            && (target.is_none() || target == Some(last));
+
+        if should_record {
+            let is_diverse = chosen
+                .iter()
+                .all(|(chosen_nodes, _, _)| {
+                    jaccard_overlap(&cand.nodes, &chosen_nodes.iter().map(|&v| v as usize).collect::<Vec<_>>()) <= 0.7
+                });
+
+            if is_diverse || chosen.len() < 3 {
+                let edges: Vec<(String, f64)> = (0..cand.nodes.len() - 1)
+                    .map(|i| {
+                        let src = cand.nodes[i];
+                        let next = cand.nodes[i + 1];
+                        let edge = graph.adjacency[src]
+                            .iter()
+                            .find(|e| e.target == next)
+                            .expect("edge must exist");
+                        (edge.kind.clone(), edge.confidence as f64)
+                    })
+                    .collect();
+
+                let node_ids: Vec<u64> = cand.nodes.iter()
+                    .map(|&idx| graph.node_ids[idx])
+                    .collect();
+
+                chosen.push((node_ids, cand.cost, edges));
+
+                if target.is_some() && cand.nodes.len() - 1 > max_hops {
+                    continue;
+                }
+                continue;
+            }
+        }
+
+        if expansions >= expansion_budget {
+            continue;
+        }
+        if let Some(&count) = node_expansions.get(&last) {
+            if count >= limit {
+                continue;
+            }
+        }
+        node_expansions.insert(last, node_expansions.get(&last).copied().unwrap_or(0) + 1);
+        expansions += 1;
+
+        if heap.len() > 4 * expansion_budget {
+            break;
+        }
+
+        for edge in &graph.adjacency[last] {
+            if cand.nodes.contains(&edge.target) {
+                continue;
+            }
+            if let Some(ref allowed) = allowed {
+                if !allowed.contains(&edge.kind) {
+                    continue;
+                }
+            }
+            if edge.confidence < min_confidence {
+                continue;
+            }
+            let new_cost = cand.cost + path_edge_cost(&edge.kind, edge.confidence) as f64;
+            let mut next_nodes = cand.nodes.clone();
+            next_nodes.push(edge.target);
+            heap.push(TopPathCandidate { cost: new_cost, nodes: next_nodes });
+        }
+    }
+
+    chosen.sort_by(|a, b| a.1.total_cmp(&b.1));
+    chosen.truncate(limit);
+    Ok(chosen)
+}
+
+fn path_edge_cost(kind: &str, confidence: f32) -> f32 {
+    let base = match kind {
+        "defines" | "Defines" => 0.35,
+        "calls" | "Calls" => 1.0,
+        "imports" | "Imports" | "depends_on" | "DependsOn" => 1.35,
+        "inherits" | "Inherits" | "implements" | "Implements" => 0.8,
+        "data_flow" | "DataFlow" => 0.5,
+        "reads_writes" | "ReadsWrites" => 0.9,
+        "tested_by" | "TestedBy" => 1.8,
+        "member_of" | "MemberOf" | "entry_of" | "EntryOf" => 3.0,
+        "describes" | "Describes" => 1.1,
+        "documented_by" | "DocumentedBy" => 1.1,
+        "mentions" | "Mentions" => 1.7,
+        "illustrates" | "Illustrates" => 1.7,
+        "similar_to" | "SimilarTo" => 2.0,
+        "rationale_for" | "RationaleFor" => 2.0,
+        _ => 1.5,
+    };
+    base / confidence.max(0.05)
+}
+
+#[derive(Clone)]
+struct TopPathCandidate {
+    cost: f64,
+    nodes: Vec<usize>,
+}
+
+impl Eq for TopPathCandidate {}
+impl PartialEq for TopPathCandidate {
+    fn eq(&self, other: &Self) -> bool {
+        (self.cost - other.cost).abs() < 1e-15 && self.nodes == other.nodes
+    }
+}
+impl Ord for TopPathCandidate {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .cost
+            .total_cmp(&self.cost)
+            .then_with(|| self.nodes.len().cmp(&other.nodes.len()))
+    }
+}
+impl PartialOrd for TopPathCandidate {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+fn jaccard_overlap(a: &[usize], b: &[usize]) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let set_a: std::collections::HashSet<usize> = a.iter().copied().collect();
+    let set_b: std::collections::HashSet<usize> = b.iter().copied().collect();
+    let intersection = set_a.intersection(&set_b).count();
+    let union = set_a.union(&set_b).count();
+    if union == 0 {
+        return 0.0;
+    }
+    intersection as f64 / union as f64
+}
 #[derive(Clone)]
 struct ImpactState {
     cost: f32,

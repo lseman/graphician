@@ -12,5 +12,6 @@ pub mod flows;
 pub mod motifs;
 pub mod resolution;
 pub mod search;
+pub mod trigram;
 pub mod structure;
 pub mod traversal;
